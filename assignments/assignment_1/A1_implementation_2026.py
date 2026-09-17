@@ -78,9 +78,9 @@ NUM_OF_MODULES: int = 20  # module budget per evolved body
 MODE: ViewerTypes = "frame"  # see show_body() for the options
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]
 
-POPULATION_SIZE: int = 50
+POPULATION_SIZE: int = 100
 MUTATION_PROBABILITY: float = 0.2
-NUM_STEPS = 20
+NUM_STEPS = 50
 
 
 def load_targets(target_dir: Path = TARGET_DIR) -> list[nx.DiGraph]:
@@ -173,34 +173,38 @@ def make_individual() -> Individual:
 
 
 def evaluate(population: Population) -> Population:
-    """Evaluate every individual in the population.
+    """Evaluate every *unevaluated* individual in the population.
 
     This is the only place where the genotype is decoded into a phenotype
     and scored against the target set. The EA does not know anything about
     the phenotype or the targets.
     """
     targets = load_targets()
-    for ind in population:
+    for ind in population.unevaluated:
         tree = TreeGenome.from_dict(ind.genotype)
         body = tree.to_networkx()
-        ind.fitness_ = fitness_function(body, targets)
-        ind.requires_eval = False
+        ind.fitness = fitness_function(body, targets)
     return population
 
 
 def parent_selection(population: Population) -> Population:
 
     shuffled = population.shuffle()
-    for idx in range(0, len(shuffled) - 1, 2):
+    n = len(shuffled)
+    for idx in range(0, n - 1, 2):
         ind_a = shuffled[idx]
         ind_b = shuffled[idx + 1]
         if ind_a.fitness_ is not None and ind_b.fitness_ is not None:
-            if ind_a.fitness_ >= ind_b.fitness_:
+            if ind_a.fitness_ <= ind_b.fitness_:
                 ind_a.tags = {"selected": True}
                 ind_b.tags = {"selected": False}
             else:
                 ind_a.tags = {"selected": False}
                 ind_b.tags = {"selected": True}
+
+    # Odd population size: the last individual has no opponent to compare against
+    if n % 2 == 1:
+        shuffled[-1].tags = {"selected": True}
 
     return shuffled
 
@@ -258,17 +262,26 @@ def mutate(population: Population) -> Population:
 
 def survivor_selection(population: Population) -> Population:
     shuffled = population.alive.shuffle()
-    alive_count = len(shuffled)
-    for idx in range(0, len(shuffled) - 1, 2):
+    n = len(shuffled)
+    alive_count = n
+    for idx in range(0, n - 1, 2):
         if alive_count <= POPULATION_SIZE:
             break
         ind_a = shuffled[idx]
         ind_b = shuffled[idx + 1]
-        if (ind_a.fitness_ or 0.0) >= (ind_b.fitness_ or 0.0):
-            ind_b.alive = False
-        else:
+        fitness_a = ind_a.fitness_ if ind_a.fitness_ is not None else float("inf")
+        fitness_b = ind_b.fitness_ if ind_b.fitness_ is not None else float("inf")
+        # Kill whichever has the HIGHER (worse) fitness - minimisation.
+        if fitness_a >= fitness_b:
             ind_a.alive = False
+        else:
+            ind_b.alive = False
         alive_count -= 1
+
+    # Odd number of alive individuals: kill the last one
+    # if n % 2 == 1 and alive_count > POPULATION_SIZE:
+    #     shuffled[-1].alive = False
+
     return population
 
 
@@ -293,7 +306,7 @@ def main() -> None:
     console.log(f"target spread : mean pairwise distance {np.mean(spread):.2f}")
 
     # Initialize population
-    initial_population = [make_individual() for _ in range(POPULATION_SIZE)]
+    initial_population = Population(make_individual() for _ in range(POPULATION_SIZE))
     initial_population = evaluate(initial_population)
 
     ea_operations: list[EAOperation] = [
