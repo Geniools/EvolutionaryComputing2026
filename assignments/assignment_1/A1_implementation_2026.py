@@ -1,8 +1,27 @@
-"""EC A1 - evolving robot bodies with ARIEL.
+"""EC A1 template code - evolving robot morphologies with ARIEL.
 
+WHAT THIS FILE IS
+-----------------
+A *demo* file for starting you out with assignment 1. 
+It samples one body at random, decodes it, scores it
+against a set of target bodies, and shows you the result. 
+
+*Your Job* section at the bottom of this file summarises the programming task. Full assignment description can be found in the pdf file on Canvas.
+
+
+THE ASSIGNMENT IN A NUTSHELL
+------------------------------
+Evolve a robot BODY that is as structurally close as possible to a whole set
+of given target bodies at once.
+
+    fitness = mean tree edit distance to every body in TARGET_DIR,
+              plus one standard deviation across those per-target distances
+
+OUR IMPLEMENTATION
+------------------
 Research question: how strict should parent selection be?
-For example: Variant A lets the top 50% reproduce, variant B the top 10%. 
-The rest stays constant
+We sweep the share of the population allowed to reproduce, see
+TRUNCATION_FRACTIONS in run_experiments.py. The rest stays constant
 
 fitness = mean tree edit distance to every target body, plus one standard deviation across those distances
 
@@ -11,7 +30,10 @@ Run `python run_experiments.py` --> for sequential testing (full experiment).
 """
 
 # Standard library
+import json
+import os
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +42,10 @@ import mujoco as mj
 import networkx as nx
 import numpy as np
 from mujoco import viewer
+
+# ARIEL makes a "__data__" folder in the working directory on import, so move
+# here first: all output then lands in assignment_1/__data__.
+os.chdir(Path(__file__).resolve().parent)
 
 # Local scripts
 from tree_edit_distance import (
@@ -55,6 +81,13 @@ type ViewerTypes = Literal["launcher", "video", "frame", "none"]
 type CullModes = Literal["random", "tournament"]
 
 # --- RANDOM GENERATOR SETUP --- #
+# Fix the seed while you are debugging.
+# Report results over MULTIPLE seeds.
+# NOTE: the tree operators use the `random` module, the NDE uses numpy for its
+# own genotype vectors AND is a torch.nn.Module for its internal network - that
+# network's weight initialisation uses torch's own RNG, entirely separate from
+# numpy/random. If you're using "nde", seed all THREE or your runs will not be
+# reproducible across separate script runs, even with the same seed value.
 # One generator for everything: ARIEL's tree operators use `random`, so
 # seeding that seeds the whole run. ("nde" would also need numpy and torch.)
 
@@ -66,9 +99,8 @@ def set_seed(seed: int) -> None:
 
 # --- DATA SETUP --- #
 SCRIPT_NAME = Path(__file__).stem
-HERE = Path(__file__).parent
-CWD = Path.cwd()
-DATA = CWD / "__data__" / SCRIPT_NAME
+HERE = Path(__file__).resolve().parent
+DATA = HERE / "__data__" / SCRIPT_NAME
 DATA.mkdir(parents=True, exist_ok=True)
 
 # --- EXPERIMENT CONSTANTS --- #
@@ -78,7 +110,7 @@ MODE: ViewerTypes = "frame"  # see show_body() for the options
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]
 
 # --- THE RESEARCH VARIABLE --- #
-TRUNCATION_FRACTION: float = 0.1  # 0.5 = variant A, 0.1 = variant B
+TRUNCATION_FRACTION: float = 0.1  # single runs only; the sweep uses run_experiments.py
 
 # --- OTHER VARIABLES --- #
 POPULATION_SIZE: int = 100
@@ -93,6 +125,18 @@ assert NUM_OFFSPRING % 2 == 0, "NUM_OFFSPRING must be even"
 
 # The random-search baseline gets the same budget
 EVALUATION_BUDGET: int = POPULATION_SIZE + NUM_OFFSPRING * NUM_STEPS
+
+
+# ============================================================================ #
+#  1. THE TARGET BODIES
+# ============================================================================ #
+#
+# The targets are plain nx.DiGraph JSON files.
+# They vary in size on purpose. A body that just matches the average module
+# count will not score well against all of them.
+#
+# ============================================================================ #
+
 
 
 def load_targets(target_dir: Path = TARGET_DIR) -> list[nx.DiGraph]:
@@ -115,6 +159,85 @@ def load_targets(target_dir: Path = TARGET_DIR) -> list[nx.DiGraph]:
     return [load_graph_from_json(p) for p in paths]
 
 
+# ============================================================================ #
+#  2. THE GENOTYPE CONTRACT
+# ============================================================================ #
+#
+# You may use EITHER of ARIEL's two body encodings below. You may NOT invent
+# your own, and CPPN is not offered for this assignment.
+# Whichever you pick, the contract is the same and it is very short:
+#
+#       your genotype  --(its decoder)-->  nx.DiGraph  -->  fitness
+#
+# That DiGraph is the phenotype, and it is all the fitness function ever sees:
+#
+#       nodes carry   type      : "CORE" | "BRICK" | "HINGE"
+#                     rotation  : "DEG_0" | "DEG_45" | "DEG_90"
+#       edges carry   face      : "FRONT" | "BACK" | "RIGHT" | "LEFT"
+#                                 | "TOP" | "BOTTOM"
+#
+# THE TWO ENCODINGS
+#
+#   "nde"   NeuralDevelopmentalEncoding + HighProbabilityDecoder
+#           Genotype: three fixed-length float vectors (type / connection /
+#           rotation genes). An INDIRECT encoding - a small vector is expanded
+#           by a fixed neural network into probability matrices, which are
+#           then decoded greedily into a body.
+#           -> Fixed-length real vector. Standard real-valued operators work
+#              out of the box. But the genotype-phenotype map is wildly
+#              non-linear: a small mutation can rebuild the robot entirely.
+#           -> IMPORTANT: `NeuralDevelopmentalEncoding`'s internal network is
+#              randomly (re-)initialised every time you construct it, and NOT
+#              derived from the genotype you pass in. If your EA's decode step
+#              builds a fresh `NeuralDevelopmentalEncoding(...)` per individual
+#              (the natural way to write it - see `random_nde_body` below),
+#              the SAME genotype decodes to a DIFFERENT random body every call,
+#              and fitness stops reflecting the genotype at all. Construct it
+#              ONCE for your whole run and reuse that one instance's
+#              `.forward()` for every genotype you decode.
+#           -> ALSO IMPORTANT: `NeuralDevelopmentalEncoding` is a
+#              `torch.nn.Module`. Its weight initialisation uses torch's own
+#              RNG, entirely separate from numpy/random. `np.random.seed(...)`
+#              and `random.seed(...)` do NOT control it - you also need
+#              `torch.manual_seed(...)`, or your results will not reproduce
+#              across separate runs even with "the same" seed.
+#
+#   "tree"  TreeGenome + its operators
+#           Genotype: the tree itself, nodes and edges.
+#           A DIRECT encoding - genotype and phenotype are the same shape.
+#           -> ariel.ec.genotypes.tree.operators already gives you
+#              random_tree, add_node, remove_subtree, subtree_swap,
+#              crossover_subtree, mutate_hoist, mutate_shrink,
+#              mutate_replace_node, mutate_subtree_replacement.
+#              Variable-length genotype, so watch for bloat.
+#
+#
+# Below, each encoding gets ONE random genotype, decoded to a graph. That is
+# your starting point, not your solution: your EA has to search this space,
+# not sample it once.
+#
+# ============================================================================ #
+
+
+
+# ============================================================================ #
+#  3. FITNESS
+# ============================================================================ #
+#
+# Fitness is the MEAN tree edit distance to every target body, PLUS one
+# standard deviation across those per-target distances. LOWER IS BETTER, and
+# 0.0 would mean your body is identical to all of them at once - which, since
+# the targets differ from each other, is impossible. There is a floor above
+# zero here and you will not reach it. Work out roughly where it is: a body
+# cannot be closer to a set than the set is to itself.
+#
+# The distance itself lives in tree_edit_distance.py.
+# Read that file - you cannot reason about your EA's behaviour without knowing what it is climbing.
+#
+# ============================================================================ #
+
+
+
 def fitness_function(
         body: nx.DiGraph,
         targets: list[nx.DiGraph],
@@ -129,6 +252,12 @@ def fitness_function(
         penalty be part of fitness, or is that the encoding's job?
     """
     return mean_plus_std_tree_edit_distance(body, targets)
+
+
+# ============================================================================ #
+#  4. LOOKING AT A BODY
+# ============================================================================ #
+
 
 
 def show_body(
@@ -382,6 +511,34 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
 # ============================================================================ #
 
 
+def base_settings() -> dict:
+    """The fixed settings, saved next to every run's results."""
+    return {
+        "population_size": POPULATION_SIZE,
+        "num_offspring": NUM_OFFSPRING,
+        "num_steps": NUM_STEPS,
+        "mutation_probability": MUTATION_PROBABILITY,
+        "cull_mode": CULL_MODE,
+        "num_elites": NUM_ELITES,
+        "num_of_modules": NUM_OF_MODULES,
+    }
+
+
+def new_run_folder(kind: str, settings: dict) -> Path:
+    """Create a fresh folder for one run, e.g. experiments/2026-09-18_20-14-05.
+
+    Every run gets its own folder, so results are never overwritten or mixed.
+    `settings.json` inside records exactly what produced them.
+    """
+    folder = DATA / kind / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    folder.mkdir(parents=True, exist_ok=False)  # never reuse a folder
+    (folder / "settings.json").write_text(
+            json.dumps(settings, indent=2),
+            encoding="utf-8",
+    )
+    return folder
+
+
 def run_ea(
         targets: list[nx.DiGraph],
         *,
@@ -500,6 +657,12 @@ def run_random_search(
     return log, best_body
 
 
+# ============================================================================ #
+#  5. ENTRY POINT
+# ============================================================================ #
+
+
+
 def main() -> None:
     """One run with the settings at the top of this file."""
     targets = load_targets()
@@ -522,10 +685,18 @@ def main() -> None:
     console.log(f"truncation    : top {TRUNCATION_FRACTION:.0%} reproduce")
     console.log(f"budget        : {EVALUATION_BUDGET} evaluations")
 
+    run_dir = new_run_folder("single_run", {
+        **base_settings(),
+        "seed": 42,
+        "truncation_fraction": TRUNCATION_FRACTION,
+        "evaluation_budget": EVALUATION_BUDGET,
+    })
+    console.log(f"output        : {run_dir}")
+
     log, best_body = run_ea(
             targets,
             seed=42,
-            db_file_path=DATA / "single_run" / "database.db",
+            db_file_path=run_dir / "database.db",
     )
 
     console.log("--- Results ---")
@@ -537,8 +708,62 @@ def main() -> None:
             + ", ".join(f"{d:.1f}" for d in distances_to_targets(best_body, targets)),
     )
 
-    show_body(best_body, mode=MODE, file_name="best_body")
+    # show_body saves relative to DATA, so point it into this run's folder.
+    image = (run_dir / "best_body").relative_to(DATA)
+    show_body(best_body, mode=MODE, file_name=str(image))
 
 
 if __name__ == "__main__":
     main()
+
+
+# ============================================================================ #
+#  YOUR JOB
+# ============================================================================ #
+#
+# Everything above samples ONE body at random and scores it. Your task is to
+# replace "random" with "evolved".
+#
+# Build a proper EA on top of `ariel.ec`. You are expected to use that module -
+# it gives you the population/individual data model, the operators, and free
+# persistence of every generation to a SQLite database, which you will want
+# when it is time to plot convergence curves for the report.
+#
+#     from ariel.ec import EA, EAOperation, Individual, Population
+#
+# For a complete, runnable example of how those pieces fit together (a one-max
+# EA with parent selection, crossover, mutation and survivor selection written
+# as separate steps), read:
+#
+#     examples/new_EC_engine_example.py
+#
+# For morphology-specific evolution with the tree encoding, read:
+#
+#     examples/c_genotypes/1_body_evolution_tree.py
+#
+# and the API documentation at:
+#
+#     https://ci-group.github.io/ariel/
+#
+# ---- GENOTYPE - DEPENDENT "GOTCHA"S -------------------------
+#
+#   TREE: VARIABLE LENGTH - Tree genotypes grow; without pressure against it they
+#     will grow forever, and every extra module costs an edit.
+#   NDE: REPRODUCIBILITY   If you're using "nde": construct
+#     `NeuralDevelopmentalEncoding` ONCE for your whole run, never per
+#     individual or per generation, AND call `torch.manual_seed(...)` in
+#     addition to the numpy/random seeds. See the two "IMPORTANT" notes under
+#     "nde" in THE GENOTYPE CONTRACT above - getting either wrong means your
+#     your runs won't reproduce cleanly.
+#
+# ---- EXPERIMENTAL RIGOUR ---------------------------------------------------
+#
+#   One run proves nothing - repeat every configuration over several
+#     independent seeds and report mean and spread.
+#   Log best/mean/worst fitness per generation. The database `ariel.ec`
+#     writes makes this straightforward.
+#   Compare against a baseline, a good standard is at least a random search.
+#   Keep the encoding, module budget and target set identical across
+#     everything you compare, change one thing at a time.
+#
+# ============================================================================ #

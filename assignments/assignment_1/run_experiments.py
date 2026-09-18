@@ -3,12 +3,14 @@
 Sweeps parent-selection strictness. A random-search baseline on the same evaluation budget is
 included for comparison.
 
-Outputs into __data__/A1_implementation_2026/experiments/:
-results.csv, convergence.png, final_vs_truncation.png, diagnostics.png,
-and one database per run.
+Each run of this script gets its own timestamped folder, so earlier results
+are never overwritten:
+assignment_1/__data__/A1_implementation_2026/experiments/<date_time>/
+with settings.json, results.csv, convergence.png, final_vs_truncation.png,
+diagnostics.png, the best body per setting, and one database per run.
 
     python run_experiments.py            # the real thing
-    python run_experiments.py --pilot    # 1 seed, 10 generations, crash check
+    python run_experiments.py --pilot    # 1 run per setting, 10 generations, crash check
 """
 
 # Standard library
@@ -28,12 +30,15 @@ from scipy.stats import mannwhitneyu
 # Local scripts
 from A1_implementation_2026 import (
     CULL_MODE,
+    DATA,
     MUTATION_PROBABILITY,
     NUM_ELITES,
     NUM_OFFSPRING,
     NUM_STEPS,
     POPULATION_SIZE,
+    base_settings,
     load_targets,
+    new_run_folder,
     run_ea,
     run_random_search,
     show_body,
@@ -46,11 +51,11 @@ from ariel import console
 # The share of the population allowed to reproduce. 1.0 = everyone, 0.05 = only the best 5%.
 TRUNCATION_FRACTIONS: list[float] = [1.0, 0.5, 0.25, 0.1, 0.05]
 
-# For the report: these two are "variant A" and "variant B".
-VARIANT_A: float = 0.5
-VARIANT_B: float = 0.1
-
-SEEDS: list[int] = list(range(1, 11))
+# Independent runs per setting. Each run gets its own seed (1, 2, 3, ...),
+# so results can be averaged and their spread reported. They run one after
+# another, not in parallel.
+NUM_RUNS_PER_SETTING: int = 10
+SEEDS: list[int] = list(range(1, NUM_RUNS_PER_SETTING + 1))
 
 BASELINE = "random"
 
@@ -147,7 +152,9 @@ def run_all(
             )
 
             if seed == seeds[0]:
-                show_body(best_body, "frame", file_name=f"best_{name}")
+                # show_body saves relative to DATA, so point it into out_dir.
+                image = (out_dir / f"best_{name}").relative_to(DATA)
+                show_body(best_body, "frame", file_name=str(image))
 
     return rows
 
@@ -328,14 +335,9 @@ def print_summary(rows: list[dict], fractions: list[float]) -> None:
         if not finals.size:
             continue
         scores[fraction] = finals
-        tag = ""
-        if fraction == VARIANT_A:
-            tag = "  <- variant A"
-        elif fraction == VARIANT_B:
-            tag = "  <- variant B"
         console.log(
                 f"top {fraction:>5.0%}   {finals.mean():.4f} +/- "
-                f"{finals.std():.4f}   (best run {finals.min():.4f}){tag}",
+                f"{finals.std():.4f}   (best run {finals.min():.4f})",
         )
 
     baseline = _finals(rows, BASELINE)
@@ -369,21 +371,26 @@ def main() -> None:
     parser.add_argument(
             "--pilot",
             action="store_true",
-            help="1 seed, 10 generations, just to check nothing crashes",
+            help="1 run per setting, 10 generations, just to check nothing crashes",
     )
     args = parser.parse_args()
 
-    base = Path.cwd() / "__data__" / "A1_implementation_2026"
     if args.pilot:
-        seeds, num_steps, out_dir = [1], 10, base / "pilot"
+        kind, seeds, num_steps = "pilot", [1], 10
     else:
-        seeds, num_steps, out_dir = SEEDS, NUM_STEPS, base / "experiments"
+        kind, seeds, num_steps = "experiments", SEEDS, NUM_STEPS
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = new_run_folder(kind, {
+        **base_settings(),
+        "num_steps": num_steps,
+        "truncation_fractions": TRUNCATION_FRACTIONS,
+        "seeds": seeds,
+        "evaluation_budget": POPULATION_SIZE + NUM_OFFSPRING * num_steps,
+    })
     variants = build_variants(TRUNCATION_FRACTIONS)
 
     console.log(f"truncation  : {[f'{f:.0%}' for f in TRUNCATION_FRACTIONS]}")
-    console.log(f"seeds       : {len(seeds)}")
+    console.log(f"runs/setting: {len(seeds)}")
     console.log(f"generations : {num_steps}")
     console.log(f"budget/run  : {POPULATION_SIZE + NUM_OFFSPRING * num_steps}")
     console.log(f"runs        : {len(variants) * len(seeds)}")
@@ -410,6 +417,7 @@ def main() -> None:
             rows, variants, TRUNCATION_FRACTIONS, out_dir / "diagnostics.png",
     )
     print_summary(rows, TRUNCATION_FRACTIONS)
+    console.log(f"results in  : {out_dir}")
 
 
 if __name__ == "__main__":
