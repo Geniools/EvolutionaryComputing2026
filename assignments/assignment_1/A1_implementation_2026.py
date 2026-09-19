@@ -34,6 +34,7 @@ import json
 import os
 import random
 from datetime import datetime
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -78,7 +79,7 @@ from ariel.utils.video_recorder import VideoRecorder
 
 # Type aliases
 type ViewerTypes = Literal["launcher", "video", "frame", "none"]
-type CullModes = Literal["random", "tournament"]
+type CullModes = Literal["random", "tournament", "offspring"]
 
 # --- RANDOM GENERATOR SETUP --- #
 # Fix the seed while you are debugging.
@@ -117,7 +118,7 @@ POPULATION_SIZE: int = 100
 NUM_OFFSPRING: int = 50  # children per generation
 NUM_STEPS: int = 200  # generations
 MUTATION_PROBABILITY: float = 0.2
-CULL_MODE: CullModes = "tournament"  # or "random"
+CULL_MODE: CullModes = "tournament"  # or "random" / "offspring"
 NUM_ELITES: int = 1  # best N are never killed
 
 # Crossover returns 2 children per call
@@ -425,7 +426,10 @@ def crossover(
         for genome in (g_a, g_b):
             child = Individual()
             child.genotype = genome.to_dict()
-            child.tags = {"mutate": True, "pairs": []}
+            # This tag lasts through mutation and evaluation, then is cleared
+            # by survivor_selection.  It identifies this generation's children
+            # when using offspring-preserving survivor selection.
+            child.tags = {"mutate": True, "pairs": [], "offspring": True}
             children.append(child)
 
     population.extend(children)
@@ -489,27 +493,71 @@ def survivor_selection(
         cull_mode: CullModes,
         num_elites: int,
 ) -> Population:
-    """Kill individuals one at a time until `population_size` is left.
+    """Reduce the living population to `population_size`.
 
-    "tournament"  --> kills the worse of two random individuals 
-    "random" --> kills one random individual, which applies no pressure at all. 
-    
-    The best `num_elites` are kept out of the draw (elitism).
+    "tournament" --> kills the worse of two random non-elites.
+    "random" --> kills one random non-elite, with no selection pressure.
+    "offspring" --> preserves this generation's children and the elites, then
+                     randomly culls parents before culling the worst children
+                     if further removals are required.
+
+    An unrecognised mode warns and falls back to tournament culling. The best
+    `num_elites` individuals are never removed.
     """
+    valid_cull_modes = {"random", "tournament", "offspring"}
+    if cull_mode not in valid_cull_modes:
+        warnings.warn(
+            f"Unknown cull mode {cull_mode!r}; using 'tournament'. "
+            "Check the spelling of CULL_MODE.",
+            stacklevel=2,
+        )
+        cull_mode = "tournament"
+
     alive = population.alive.to_list()
     number_to_kill = max(0, len(alive) - population_size)
-    if number_to_kill == 0:
-        return population
+    ranked = sorted(alive, key=_fitness_of)
+    elite_ids = {id(ind) for ind in ranked[:num_elites]}
 
-    pool = sorted(alive, key=_fitness_of)[num_elites:]
+    if cull_mode == "offspring":
+        # New children are protected first. Elites are global, so a child can
+        # also be an elite. Select parent losers without replacement.
+        parent_pool = [
+            ind for ind in alive
+            if id(ind) not in elite_ids and not ind.tags.get("offspring", False)
+        ]
+        parents_to_kill = min(number_to_kill, len(parent_pool))
+        for loser in random.sample(parent_pool, parents_to_kill):
+            loser.alive = False
 
-    for _ in range(number_to_kill):
-        if cull_mode == "random":
-            loser = random.choice(pool)
-        else:
-            loser = max(random.sample(pool, min(2, len(pool))), key=_fitness_of)
-        loser.alive = False
-        pool.remove(loser)
+        # If protecting children leaves too few parents to reach the desired
+        # size, remove the worst non-elite children as a safety fallback.
+        children_to_kill = number_to_kill - parents_to_kill
+        child_pool = [
+            ind for ind in alive
+            if id(ind) not in elite_ids and ind.tags.get("offspring", False)
+        ]
+        if children_to_kill > len(child_pool):
+            raise ValueError(
+                "survivor selection cannot reach population_size while "
+                "preserving the requested elites"
+            )
+        for loser in sorted(child_pool, key=_fitness_of, reverse=True)[:children_to_kill]:
+            loser.alive = False
+    else:
+        pool = ranked[num_elites:]
+        for _ in range(number_to_kill):
+            if cull_mode == "random":
+                loser = random.choice(pool)
+            else:
+                loser = max(random.sample(pool, min(2, len(pool))), key=_fitness_of)
+            loser.alive = False
+            pool.remove(loser)
+
+    # Do not protect surviving children again next generation. `tags` merges,
+    # so the flag must explicitly be reset rather than omitted.
+    for ind in alive:
+        if ind.tags.get("offspring", False):
+            ind.tags = {"offspring": False}
 
     return population
 
