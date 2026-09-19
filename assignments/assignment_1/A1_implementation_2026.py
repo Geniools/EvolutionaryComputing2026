@@ -34,6 +34,7 @@ import json
 import os
 import random
 from datetime import datetime
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -78,7 +79,7 @@ from ariel.utils.video_recorder import VideoRecorder
 
 # Type aliases
 type ViewerTypes = Literal["launcher", "video", "frame", "none"]
-type CullModes = Literal["random", "tournament"]
+type CullModes = Literal["random", "tournament", "offspring"]
 
 # --- RANDOM GENERATOR SETUP --- #
 # Fix the seed while you are debugging.
@@ -117,7 +118,7 @@ POPULATION_SIZE: int = 100
 NUM_OFFSPRING: int = 50  # children per generation
 NUM_STEPS: int = 200  # generations
 MUTATION_PROBABILITY: float = 0.2
-CULL_MODE: CullModes = "tournament"  # or "random"
+CULL_MODE: CullModes = "tournament"  # or "random" / "offspring"
 NUM_ELITES: int = 1  # best N are never killed
 
 # Crossover returns 2 children per call
@@ -385,14 +386,29 @@ def parent_selection(
     return population
 
 
-def crossover(population: Population) -> Population:
-    """Make two children per pair tagged by `parent_selection`."""
+def crossover(
+        population: Population,
+        *,
+        fallback_log: list[dict] | None = None,
+) -> Population:
+    """Make two children per pair tagged by `parent_selection`.
+
+    DIAGNOSTIC (see run_experiments.py "Crossover fallback rate" panel):
+    ARIEL's `crossover_subtree` returns unchanged deep-copies of the two
+    parents whenever the subtree swap it attempted would produce an invalid
+    body. We count how often a child comes back byte-identical to its parent
+    instead of guessing - this also catches the (much rarer) case where a
+    swap succeeds but coincidentally reproduces a parent exactly, which is
+    the same "wasted evaluation" outcome from the population's point of view.
+    """
     pairs: dict[int, list[Individual]] = {}
     for ind in population:
         for pair_number in ind.tags.get("pairs", []):
             pairs.setdefault(int(pair_number), []).append(ind)
 
     children: list[Individual] = []
+    num_pairs = 0
+    num_fallback_children = 0
     for members in pairs.values():
         if len(members) != 2:  # should not happen
             continue
@@ -403,14 +419,32 @@ def crossover(population: Population) -> Population:
         # ARIEL returns unchanged copies of the parents if the swap would
         # make an invalid body --> some children are clones.
         g_a, g_b = crossover_subtree(tree_a, tree_b)
+        num_pairs += 1
+        num_fallback_children += g_a.to_dict() == tree_a.to_dict()
+        num_fallback_children += g_b.to_dict() == tree_b.to_dict()
 
         for genome in (g_a, g_b):
             child = Individual()
             child.genotype = genome.to_dict()
-            child.tags = {"mutate": True, "pairs": []}
+            # This tag lasts through mutation and evaluation, then is cleared
+            # by survivor_selection.  It identifies this generation's children
+            # when using offspring-preserving survivor selection.
+            child.tags = {"mutate": True, "pairs": [], "offspring": True}
             children.append(child)
 
     population.extend(children)
+
+    if fallback_log is not None:
+        num_children = 2 * num_pairs
+        fallback_log.append({
+            "num_pairs": num_pairs,
+            "num_children": num_children,
+            "num_fallback_children": num_fallback_children,
+            "fallback_rate": (
+                num_fallback_children / num_children if num_children else 0.0
+            ),
+        })
+
     return population
 
 
@@ -459,32 +493,81 @@ def survivor_selection(
         cull_mode: CullModes,
         num_elites: int,
 ) -> Population:
-    """Kill individuals one at a time until `population_size` is left.
+    """Reduce the living population to `population_size`.
 
-    "tournament"  --> kills the worse of two random individuals 
-    "random" --> kills one random individual, which applies no pressure at all. 
-    
-    The best `num_elites` are kept out of the draw (elitism).
+    "tournament" --> kills the worse of two random non-elites.
+    "random" --> kills one random non-elite, with no selection pressure.
+    "offspring" --> preserves this generation's children and the elites, then
+                     randomly culls parents before culling the worst children
+                     if further removals are required.
+
+    An unrecognised mode warns and falls back to tournament culling. The best
+    `num_elites` individuals are never removed.
     """
+    valid_cull_modes = {"random", "tournament", "offspring"}
+    if cull_mode not in valid_cull_modes:
+        warnings.warn(
+            f"Unknown cull mode {cull_mode!r}; using 'tournament'. "
+            "Check the spelling of CULL_MODE.",
+            stacklevel=2,
+        )
+        cull_mode = "tournament"
+
     alive = population.alive.to_list()
     number_to_kill = max(0, len(alive) - population_size)
-    if number_to_kill == 0:
-        return population
+    ranked = sorted(alive, key=_fitness_of)
+    elite_ids = {id(ind) for ind in ranked[:num_elites]}
 
-    pool = sorted(alive, key=_fitness_of)[num_elites:]
+    if cull_mode == "offspring":
+        # New children are protected first. Elites are global, so a child can
+        # also be an elite. Select parent losers without replacement.
+        parent_pool = [
+            ind for ind in alive
+            if id(ind) not in elite_ids and not ind.tags.get("offspring", False)
+        ]
+        parents_to_kill = min(number_to_kill, len(parent_pool))
+        for loser in random.sample(parent_pool, parents_to_kill):
+            loser.alive = False
 
-    for _ in range(number_to_kill):
-        if cull_mode == "random":
-            loser = random.choice(pool)
-        else:
-            loser = max(random.sample(pool, min(2, len(pool))), key=_fitness_of)
-        loser.alive = False
-        pool.remove(loser)
+        # If protecting children leaves too few parents to reach the desired
+        # size, remove the worst non-elite children as a safety fallback.
+        children_to_kill = number_to_kill - parents_to_kill
+        child_pool = [
+            ind for ind in alive
+            if id(ind) not in elite_ids and ind.tags.get("offspring", False)
+        ]
+        if children_to_kill > len(child_pool):
+            raise ValueError(
+                "survivor selection cannot reach population_size while "
+                "preserving the requested elites"
+            )
+        for loser in sorted(child_pool, key=_fitness_of, reverse=True)[:children_to_kill]:
+            loser.alive = False
+    else:
+        pool = ranked[num_elites:]
+        for _ in range(number_to_kill):
+            if cull_mode == "random":
+                loser = random.choice(pool)
+            else:
+                loser = max(random.sample(pool, min(2, len(pool))), key=_fitness_of)
+            loser.alive = False
+            pool.remove(loser)
+
+    # Do not protect surviving children again next generation. `tags` merges,
+    # so the flag must explicitly be reset rather than omitted.
+    for ind in alive:
+        if ind.tags.get("offspring", False):
+            ind.tags = {"offspring": False}
 
     return population
 
 
-def record_stats(population: Population, *, log: list[dict]) -> Population:
+def record_stats(
+        population: Population,
+        *,
+        log: list[dict],
+        fallback_log: list[dict] | None = None,
+) -> Population:
     """Log this generation. Inluding the two std columns (diversity measures)"""
     alive = [ind for ind in population.alive if ind.fitness_ is not None]
     if not alive:
@@ -492,6 +575,12 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
 
     fitnesses = np.array([ind.fitness_ for ind in alive], dtype=float)
     modules = np.array([_num_modules(ind) for ind in alive], dtype=float)
+
+    # Generation 0 (initial population) never went through `crossover`, so
+    # there is nothing to report yet -> NaN instead of a fake 0.
+    crossover_fallback_rate = (
+        fallback_log[-1]["fallback_rate"] if fallback_log else float("nan")
+    )
 
     log.append({
         "generation": len(log),
@@ -502,6 +591,7 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
         "mean_modules": float(modules.mean()),
         "modules_std": float(modules.std()),
         "population_size": len(alive),
+        "crossover_fallback_rate": crossover_fallback_rate,
     })
     return population
 
@@ -561,6 +651,7 @@ def run_ea(
     set_seed(seed)
 
     log: list[dict] = []
+    fallback_log: list[dict] = []  # crossover fallback-rate diagnostic, per generation
 
     initial_population = Population([
         make_individual() for _ in range(population_size)
@@ -574,7 +665,7 @@ def run_ea(
                 truncation_fraction=truncation_fraction,
                 num_offspring=num_offspring,
         ),
-        EAOperation(crossover),
+        EAOperation(crossover, fallback_log=fallback_log),
         EAOperation(
                 mutate,
                 mutation_probability=mutation_probability,
@@ -587,7 +678,7 @@ def run_ea(
                 cull_mode=cull_mode,
                 num_elites=num_elites,
         ),
-        EAOperation(record_stats, log=log),
+        EAOperation(record_stats, log=log, fallback_log=fallback_log),
     ]
 
     ea = EA(
