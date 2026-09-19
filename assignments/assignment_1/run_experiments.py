@@ -71,6 +71,7 @@ COLUMNS = [
     "mean_modules",
     "modules_std",
     "population_size",
+    "crossover_fallback_rate",
 ]
 
 
@@ -194,8 +195,10 @@ def _plot_band(axis, rows, variant, column, *, label, color) -> None:
     if data.size == 0:
         return
     generations = np.arange(data.shape[1])
-    mean = data.mean(axis=0)
-    std = data.std(axis=0)
+    # nan-aware: generation 0 has no crossover_fallback_rate yet (see
+    # record_stats), and this keeps that gap from raising warnings elsewhere.
+    mean = np.nanmean(data, axis=0)
+    std = np.nanstd(data, axis=0)
     axis.plot(generations, mean, label=label, color=color)
     axis.fill_between(
             generations,
@@ -296,15 +299,19 @@ def plot_diagnostics(
 ) -> None:
     """Diversity and body size, to explain the convergence curves."""
     colours = _colours(fractions)
-    figure, axes = plt.subplots(1, 3, figsize=(14, 4))
+    figure, axes = plt.subplots(1, 4, figsize=(18, 4))
 
     panels = [
-        ("mean", "Mean fitness of population"),
-        ("fitness_std", "Fitness spread (diversity)"),
-        ("mean_modules", "Mean modules per body (bloat)"),
+        ("mean", "Mean fitness of population", True),
+        ("fitness_std", "Fitness spread (diversity)", True),
+        ("mean_modules", "Mean modules per body (bloat)", True),
+        # Random search never runs crossover, so it has nothing to show here.
+        ("crossover_fallback_rate", "Crossover fallback rate (clone children)", False),
     ]
-    for axis, (column, title) in zip(axes, panels, strict=True):
+    for axis, (column, title, include_baseline) in zip(axes, panels, strict=True):
         for name, settings in variants.items():
+            if not include_baseline and name == BASELINE:
+                continue
             _plot_band(
                     axis,
                     rows,
@@ -318,6 +325,7 @@ def plot_diagnostics(
         axis.grid(alpha=0.3)
     axes[0].set_ylabel("Value")
     axes[0].legend(fontsize=7)
+    axes[3].set_ylabel("Fraction of children")
 
     figure.tight_layout()
     figure.savefig(path, dpi=200)
@@ -346,6 +354,14 @@ def print_summary(rows: list[dict], fractions: list[float]) -> None:
                 f"{'random':>9}   {baseline.mean():.4f} +/- "
                 f"{baseline.std():.4f}   (best run {baseline.min():.4f})",
         )
+
+    console.rule("[green]Crossover fallback rate (mean over generations 1+, seeds)")
+    for fraction in sorted(fractions, reverse=True):
+        rates = _curves(rows, variant_name(fraction), "crossover_fallback_rate")
+        if not rates.size:
+            continue
+        rates = rates[:, 1:]  # drop generation 0 (NaN, no crossover happened yet)
+        console.log(f"top {fraction:>5.0%}   {np.nanmean(rates):.2%}")
 
     if len(scores) < 2:
         return

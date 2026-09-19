@@ -385,14 +385,29 @@ def parent_selection(
     return population
 
 
-def crossover(population: Population) -> Population:
-    """Make two children per pair tagged by `parent_selection`."""
+def crossover(
+        population: Population,
+        *,
+        fallback_log: list[dict] | None = None,
+) -> Population:
+    """Make two children per pair tagged by `parent_selection`.
+
+    DIAGNOSTIC (see run_experiments.py "Crossover fallback rate" panel):
+    ARIEL's `crossover_subtree` returns unchanged deep-copies of the two
+    parents whenever the subtree swap it attempted would produce an invalid
+    body. We count how often a child comes back byte-identical to its parent
+    instead of guessing - this also catches the (much rarer) case where a
+    swap succeeds but coincidentally reproduces a parent exactly, which is
+    the same "wasted evaluation" outcome from the population's point of view.
+    """
     pairs: dict[int, list[Individual]] = {}
     for ind in population:
         for pair_number in ind.tags.get("pairs", []):
             pairs.setdefault(int(pair_number), []).append(ind)
 
     children: list[Individual] = []
+    num_pairs = 0
+    num_fallback_children = 0
     for members in pairs.values():
         if len(members) != 2:  # should not happen
             continue
@@ -403,6 +418,9 @@ def crossover(population: Population) -> Population:
         # ARIEL returns unchanged copies of the parents if the swap would
         # make an invalid body --> some children are clones.
         g_a, g_b = crossover_subtree(tree_a, tree_b)
+        num_pairs += 1
+        num_fallback_children += g_a.to_dict() == tree_a.to_dict()
+        num_fallback_children += g_b.to_dict() == tree_b.to_dict()
 
         for genome in (g_a, g_b):
             child = Individual()
@@ -411,6 +429,18 @@ def crossover(population: Population) -> Population:
             children.append(child)
 
     population.extend(children)
+
+    if fallback_log is not None:
+        num_children = 2 * num_pairs
+        fallback_log.append({
+            "num_pairs": num_pairs,
+            "num_children": num_children,
+            "num_fallback_children": num_fallback_children,
+            "fallback_rate": (
+                num_fallback_children / num_children if num_children else 0.0
+            ),
+        })
+
     return population
 
 
@@ -484,7 +514,12 @@ def survivor_selection(
     return population
 
 
-def record_stats(population: Population, *, log: list[dict]) -> Population:
+def record_stats(
+        population: Population,
+        *,
+        log: list[dict],
+        fallback_log: list[dict] | None = None,
+) -> Population:
     """Log this generation. Inluding the two std columns (diversity measures)"""
     alive = [ind for ind in population.alive if ind.fitness_ is not None]
     if not alive:
@@ -492,6 +527,12 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
 
     fitnesses = np.array([ind.fitness_ for ind in alive], dtype=float)
     modules = np.array([_num_modules(ind) for ind in alive], dtype=float)
+
+    # Generation 0 (initial population) never went through `crossover`, so
+    # there is nothing to report yet -> NaN instead of a fake 0.
+    crossover_fallback_rate = (
+        fallback_log[-1]["fallback_rate"] if fallback_log else float("nan")
+    )
 
     log.append({
         "generation": len(log),
@@ -502,6 +543,7 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
         "mean_modules": float(modules.mean()),
         "modules_std": float(modules.std()),
         "population_size": len(alive),
+        "crossover_fallback_rate": crossover_fallback_rate,
     })
     return population
 
@@ -561,6 +603,7 @@ def run_ea(
     set_seed(seed)
 
     log: list[dict] = []
+    fallback_log: list[dict] = []  # crossover fallback-rate diagnostic, per generation
 
     initial_population = Population([
         make_individual() for _ in range(population_size)
@@ -574,7 +617,7 @@ def run_ea(
                 truncation_fraction=truncation_fraction,
                 num_offspring=num_offspring,
         ),
-        EAOperation(crossover),
+        EAOperation(crossover, fallback_log=fallback_log),
         EAOperation(
                 mutate,
                 mutation_probability=mutation_probability,
@@ -587,7 +630,7 @@ def run_ea(
                 cull_mode=cull_mode,
                 num_elites=num_elites,
         ),
-        EAOperation(record_stats, log=log),
+        EAOperation(record_stats, log=log, fallback_log=fallback_log),
     ]
 
     ea = EA(
