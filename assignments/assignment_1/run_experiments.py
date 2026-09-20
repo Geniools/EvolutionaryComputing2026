@@ -139,12 +139,14 @@ def run_all(
                 )
 
             for entry in log:
-                rows.append({
-                    "variant": name,
-                    "truncation_fraction": fraction,
-                    "seed": seed,
-                    **entry,
-                })
+                rows.append(
+                        {
+                            "variant"            : name,
+                            "truncation_fraction": fraction,
+                            "seed"               : seed,
+                            **entry,
+                        }
+                )
 
             elapsed = time.perf_counter() - started
             console.log(
@@ -189,14 +191,21 @@ def _finals(rows: list[dict], variant: str) -> np.ndarray:
     return data[:, -1] if data.size else np.array([])
 
 
-def _plot_band(axis, rows, variant, column, *, label, color) -> None:
-    """Mean across seeds as a line, with a +/- 1 std band."""
+def _plot_band(axis, rows, variant, column, *, label, color, start_gen: int = 0) -> None:
+    """Mean across seeds as a line, with a +/- 1 std band.
+
+    ``start_gen`` skips leading generations before averaging. Needed for
+    "crossover_fallback_rate": generation 0 never ran crossover, so every
+    seed is NaN there
+    """
     data = _curves(rows, variant, column)
     if data.size == 0:
         return
-    generations = np.arange(data.shape[1])
-    # nan-aware: generation 0 has no crossover_fallback_rate yet (see
-    # record_stats), and this keeps that gap from raising warnings elsewhere.
+    if start_gen:
+        data = data[:, start_gen:]
+        if data.size == 0:
+            return
+    generations = np.arange(start_gen, start_gen + data.shape[1])
     mean = np.nanmean(data, axis=0)
     std = np.nanstd(data, axis=0)
     axis.plot(generations, mean, label=label, color=color)
@@ -309,6 +318,10 @@ def plot_diagnostics(
         ("crossover_fallback_rate", "Crossover fallback rate (clone children)", False),
     ]
     for axis, (column, title, include_baseline) in zip(axes, panels, strict=True):
+        # crossover_fallback_rate is NaN at generation 0 for every seed
+        # (see record_stats); start the average one generation later so
+        # numpy doesn't warn about an all-NaN mean/std.
+        start_gen = 1 if column == "crossover_fallback_rate" else 0
         for name, settings in variants.items():
             if not include_baseline and name == BASELINE:
                 continue
@@ -319,6 +332,7 @@ def plot_diagnostics(
                     column,
                     label=settings["label"],
                     color=colours[name],
+                    start_gen=start_gen,
             )
         axis.set_xlabel("Generation")
         axis.set_title(title, fontsize=10)
@@ -396,13 +410,15 @@ def main() -> None:
     else:
         kind, seeds, num_steps = "experiments", SEEDS, NUM_STEPS
 
-    out_dir = new_run_folder(kind, {
-        **base_settings(),
-        "num_steps": num_steps,
-        "truncation_fractions": TRUNCATION_FRACTIONS,
-        "seeds": seeds,
-        "evaluation_budget": POPULATION_SIZE + NUM_OFFSPRING * num_steps,
-    })
+    out_dir = new_run_folder(
+        kind, {
+                **base_settings(),
+                "num_steps"           : num_steps,
+                "truncation_fractions": TRUNCATION_FRACTIONS,
+                "seeds"               : seeds,
+                "evaluation_budget"   : POPULATION_SIZE + NUM_OFFSPRING * num_steps,
+            }
+        )
     variants = build_variants(TRUNCATION_FRACTIONS)
 
     console.log(f"truncation  : {[f'{f:.0%}' for f in TRUNCATION_FRACTIONS]}")
