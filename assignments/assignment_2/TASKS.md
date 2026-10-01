@@ -12,7 +12,6 @@
 - **M3's plotting/aggregation helper is a shared blocker.** Build it early (even against a
   dummy run) so M2 and M4 aren't stuck waiting for it right before the report is due.
 - M2's pipeline wiring needs a first working draft from **M3 (`mutate`) and M4 (`crossover`)**
-- **M1's baseline is independent** of M2/M3/M4's code and can start immediately
 
 ---
 
@@ -110,10 +109,10 @@
 
 ---
 
-## Final Checklist (all members, Day 7)
+## Final Checklist
 
 - [ ] Code cleanup done
-- [ ] Page limit respected (≤6 pages excl. cover + bibliography)
+- [ ] Page limit respected (≤6 pages, excl. cover + bibliography)
 - [ ] Full-team report read-through completed
 - [ ] `groupnumber.zip` packaged and submitted
 

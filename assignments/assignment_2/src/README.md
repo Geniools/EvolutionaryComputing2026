@@ -29,8 +29,7 @@ src/
 
 Run everything via `main.py`.
 
-> Note: Make sure to set the root folder to `assignments/assignment_2/` in your IDE, so that `src/` is on the Python
-> path.
+> Note: Make sure to set the root folder to `assignments/assignment_2/src` in your IDE.
 
 ## Execution flow
 
