@@ -1,6 +1,6 @@
 from ariel.ec import FloatsGenerator, Individual
 
-from src.environment.controller import genotype_length
+from environment.controller import genotype_length
 
 # Initial sampling scale, taken from the template's `make_random_weights`
 # (RNG.normal(scale=0.5, ...)) - the same distribution, now used to seed

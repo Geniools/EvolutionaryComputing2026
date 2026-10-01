@@ -15,10 +15,8 @@ MODE: ViewerTypes = "launcher"
 HIDDEN_SIZE: int = 6
 
 # -- EA hyperparameters -----------------------------------------------------
-# Not specified by the assignment. Choose these deliberately and keep them
-# fixed across the runs/seeds you compare against each other.
-POPULATION_SIZE: int | None = None  # TODO: decide
-NUM_GENERATIONS: int | None = None  # TODO: decide
+POPULATION_SIZE: int = 100
+NUM_GENERATIONS: int = 20
 
 # -- Baseline -----------------------------------------------------------------
 # "Random search with the same evaluation budget" (template, YOUR JOB section).

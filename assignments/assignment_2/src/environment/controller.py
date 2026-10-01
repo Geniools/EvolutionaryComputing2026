@@ -12,7 +12,7 @@ import mujoco as mj
 import numpy as np
 import numpy.typing as npt
 
-from src.config import HIDDEN_SIZE
+from config import HIDDEN_SIZE
 
 type Weights = list[npt.NDArray[np.float64]]
 type Genotype = npt.NDArray[np.float64] | list[float]

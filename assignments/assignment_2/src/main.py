@@ -30,9 +30,6 @@ set_seed(SEED)
 
 def build_initial_population(input_size: int, output_size: int) -> Population:
     """Create the starting population of randomly initialised individuals."""
-    if POPULATION_SIZE is None:
-        msg = "config.POPULATION_SIZE is not set - see config.py TODOs."
-        raise ValueError(msg)
     return Population(
             [make_individual(input_size, output_size) for _ in range(POPULATION_SIZE)],
     )
@@ -44,21 +41,17 @@ def run_evolution() -> None:
     console.log(f"controller inputs (len(data.qpos)) : {input_size}")
     console.log(f"controller outputs (model.nu)      : {output_size}")
 
-    if POPULATION_SIZE is None or NUM_GENERATIONS is None:
-        msg = "config.POPULATION_SIZE / NUM_GENERATIONS are not set."
-        raise ValueError(msg)
-
     ea_config.target_population_size = POPULATION_SIZE
     ea_config.is_maximisation = False  # fitness_function: lower is better
 
     initial = evaluate(build_initial_population(input_size, output_size))
 
     ops: list[EAOperation] = [
-        EAOperation(parent_selection),
-        EAOperation(crossover),
-        EAOperation(mutate),
+        # EAOperation(parent_selection),
+        # EAOperation(crossover),
+        # EAOperation(mutate),
         EAOperation(evaluate),
-        EAOperation(survivor_selection),
+        # EAOperation(survivor_selection),
     ]
 
     ea = EA(initial, ops, num_steps=NUM_GENERATIONS)

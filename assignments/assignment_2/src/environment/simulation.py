@@ -1,10 +1,11 @@
 import mujoco as mj
 from mujoco import viewer
 
-from src.config import SIM_DURATION, SPAWN_POS, ViewerTypes
-from controller import Genotype, decode_genotype, nn_controller
-from fitness import fitness_function, get_core_position
-from world import build_robot, build_world
+from config import SIM_DURATION, SPAWN_POS, ViewerTypes
+from environment.controller import Genotype, decode_genotype, nn_controller
+from environment.fitness import fitness_function, get_core_position
+from environment.world import build_robot, build_world
+
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder

@@ -2,7 +2,7 @@ import mujoco as mj
 import numpy as np
 import numpy.typing as npt
 
-from src.config import TARGET_POSITION
+from config import TARGET_POSITION
 
 
 def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
