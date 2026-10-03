@@ -2,9 +2,8 @@
 
 WHAT THIS FILE IS
 -----------------
-A *demo*, not a solution. It spawns a robot, drives it with a neural network
-whose weights are RANDOM, runs the simulation, and reports how close the robot
-ended up to a target.
+A *demo*, not a solution. It evaluates populations of randomly weighted
+neural-network controllers and reports how close each robot ends up to a target.
 
 There is deliberately NO evolution in here. Building the EA (representation,
 initialisation, parent selection, variation, survivor selection) is the assignment.
@@ -20,8 +19,8 @@ SPAWN_POS to TARGET_POSITION within the simulation time.
 HOW TO RUN
 ----------
 
-Change MODE below to switch between an interactive viewer, a headless run,
-a rendered video, or a single frame.
+Population evaluations run headlessly. Pass a mode to run_experiment() to
+view or record an individual controller.
 """
 
 # Standard library
@@ -68,7 +67,11 @@ DATA.mkdir(parents=True, exist_ok=True)
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts
 TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up
 SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
-MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
+MODE: ViewerTypes = "simple"  # see run_experiment() for the options
+
+# --- EXPERIMENT SIZE --- #
+population_size = 100
+num_generations = 5
 
 
 # ============================================================================ #
@@ -235,8 +238,11 @@ def fitness_function(
 # ============================================================================ #
 
 
-def run_experiment(mode: ViewerTypes = MODE) -> float:
-    """Set up the world, run one simulation, and return the fitness.
+def run_experiment(
+    weights: list[npt.NDArray[np.float64]],
+    mode: ViewerTypes = MODE,
+) -> float:
+    """Evaluate one controller's weights in a fresh simulation.
 
     This is the function your EA calls once per individual, with `mode` set
     to "simple" (headless).
@@ -272,8 +278,8 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
     # the body you chose in build_robot().
     input_size = len(data.qpos)
     output_size = model.nu
-
-    weights = make_random_weights(input_size, output_size)
+    
+    
 
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
         """Compute and apply actions; MuJoCo calls this every physics step."""
@@ -335,7 +341,7 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
 
 
 def main() -> None:
-    """Run a single demo evaluation with a randomly-weighted controller."""
+    """Evaluate a population over generations (random-search baseline)."""
     # A quick look at the size of the problem you are about to search.
     mj.set_mjcb_control(None)
     world = build_world()
@@ -358,7 +364,32 @@ def main() -> None:
     console.log(f"controller outputs (model.nu)      : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
 
-    run_experiment(MODE)
+    best_fitness = float("inf")
+    best_weights = None
+
+    for generation in range(num_generations):
+        # Replace this random sampling with ariel.ec initialisation and
+        # offspring generation when we add selection, crossover and mutation.
+        population = [
+            make_random_weights(input_size, output_size)
+            for _ in range(population_size)
+        ]
+        fitnesses = [run_experiment(weights) for weights in population]
+        generation_best_index = int(np.argmin(fitnesses))
+        generation_best = fitnesses[generation_best_index]
+        if generation_best < best_fitness:
+            best_fitness = generation_best
+            best_weights = population[generation_best_index]
+
+        console.log(
+            f"generation {generation + 1}: "
+            f"best={generation_best:.4f}, "
+            f"mean={np.mean(fitnesses):.4f}, "
+            f"worst={max(fitnesses):.4f}"
+        )
+
+    console.log(f"best fitness overall: {best_fitness:.4f}")
+    # best_weights holds the controller to replay or seed later EA.
 
 
 if __name__ == "__main__":
@@ -369,9 +400,6 @@ if __name__ == "__main__":
 #  YOUR JOB
 # ============================================================================ #
 #
-# Everything above runs one robot with random weights. It will score badly, and
-# it will score badly in a slightly different way every time you change SEED.
-# Your task is to replace "random" with "evolved".
 #
 # Build a proper EA on top of `ariel.ec`. You are expected to use that module -
 # it gives you the population/individual data model, the operators, and free
