@@ -10,5 +10,5 @@ def evaluate(population: Population) -> Population:
     """ Run every unevaluated individual headlessly and record its fitness. """
     for ind in population.unevaluated:
         genotype = cast("Genotype", ind.genotype)
-        ind.fitness = run_simulation(genotype, mode="launcher")
+        ind.fitness = run_simulation(genotype, mode="simple")
     return population
