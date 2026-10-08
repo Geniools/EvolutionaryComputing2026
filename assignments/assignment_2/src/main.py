@@ -1,32 +1,30 @@
-"""Entry point: assemble and run the neuroevolution EA.
+"""Run the Assignment 2 EA for one or more seeds.
 
-Mirrors `A2_template_2026.py::main()` (report the problem size) plus the
-EA-assembly pattern from `examples/new_EC_engine_example.py` (build an
-initial Population, list the EAOperations, hand both to `ariel.ec.EA`).
+Use python main.py for seeds 1 through 5 by default, or pass --seeds in the
+terminal to choose single or multiple different seeds. 
+Each seed gets its own database, generation statistics go to one CSV.
 """
 
+import argparse
+import csv
 import os
+import random
 from pathlib import Path
-from typing import cast
 
 from ariel import console
 from ariel.ec import EA, EAOperation, Population, config as ea_config, set_seed
 
-from config import MODE, NUM_GENERATIONS, POPULATION_SIZE, SEED
-from environment.controller import Genotype
+from config import NUM_GENERATIONS, POPULATION_SIZE
+from environment.simulation import get_io_sizes
 from evolution.crossover import crossover
 from evolution.evaluation import evaluate
 from evolution.genotype import make_individual
 from evolution.mutation import mutate
 from evolution.selection import parent_selection, survivor_selection
-from environment.simulation import get_io_sizes, run_simulation
 
 # ARIEL/EA write to "__data__" in the working directory - land in
 # assignment_2/__data__ regardless of where this script is invoked from.
 os.chdir(Path(__file__).resolve().parent.parent)
-
-set_seed(SEED)
-
 
 def build_initial_population(input_size: int, output_size: int) -> Population:
     """Create the starting population of randomly initialised individuals."""
@@ -35,34 +33,86 @@ def build_initial_population(input_size: int, output_size: int) -> Population:
     )
 
 
-def run_evolution() -> None:
-    """Run the EA and report the best evolved controller."""
+def record_stats(population: Population, *, log: list[dict]) -> Population:
+    """Record best, mean, and worst fitness among living individuals."""
+    fitnesses = [ind.fitness for ind in population.alive if ind.fitness_ is not None]
+    if not fitnesses:
+        raise ValueError("No living, evaluated individuals to record")
+
+    log.append({
+        "generation": len(log),
+        "best": min(fitnesses),
+        "mean": sum(fitnesses) / len(fitnesses),
+        "worst": max(fitnesses),
+        "population_size": len(fitnesses),
+    })
+    return population
+
+
+def run_evolution(seed: int, db_path: Path) -> list[dict]:
+    """Run one seed and return its generation statistics."""
+    random.seed(seed)
+    set_seed(seed)
+
     input_size, output_size = get_io_sizes()
     console.log(f"controller inputs (len(data.qpos)) : {input_size}")
     console.log(f"controller outputs (model.nu)      : {output_size}")
 
     ea_config.target_population_size = POPULATION_SIZE
-    ea_config.is_maximisation = False  # fitness_function: lower is better
 
     initial = evaluate(build_initial_population(input_size, output_size))
+    log: list[dict] = []
+    record_stats(initial, log=log)  # Generation 0
 
     ops: list[EAOperation] = [
-        # EAOperation(parent_selection),
-        # EAOperation(crossover),
-        # EAOperation(mutate),
+        EAOperation(parent_selection),
+        EAOperation(crossover),
+        EAOperation(mutate),
         EAOperation(evaluate),
-        # EAOperation(survivor_selection),
+        EAOperation(survivor_selection),
+        EAOperation(record_stats, log=log),
     ]
 
-    ea = EA(initial, ops, num_steps=NUM_GENERATIONS)
+    ea = EA(
+        initial,
+        ops,
+        num_steps=NUM_GENERATIONS,
+        is_maximisation=False,
+        db_file_path=db_path,
+        db_handling="delete",
+    )
     ea.run()
+    return log
 
-    best = ea.get_solution("best")
-    console.log(f"best fitness: {best.fitness:.4f} (lower is better)")
 
-    # Watch the evolved controller. Switch mode to "video" for report figures.
-    run_simulation(cast("Genotype", best.genotype), mode=MODE)
+def main() -> None:
+    """Run the requested seeds and save one row per generation and seed."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3, 4, 5])
+    seeds = parser.parse_args().seeds
+    if len(seeds) != len(set(seeds)):
+        parser.error("Each seed must be listed only once")
+
+    output_dir = Path("__data__") / "a2_experiments"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results_path = output_dir / "results.csv"
+
+    with results_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=["seed", "generation", "best", "mean", "worst", "population_size"],
+        )
+        writer.writeheader()
+
+        for seed in seeds:
+            console.log(f"running seed {seed}")
+            log = run_evolution(seed, output_dir / f"seed_{seed}.db")
+            writer.writerows({"seed": seed, **entry} for entry in log)
+            file.flush()
+            console.log(f"seed {seed}: final best fitness {log[-1]['best']:.4f}")
+
+    console.log(f"saved {results_path}")
 
 
 if __name__ == "__main__":
-    run_evolution()
+    main()

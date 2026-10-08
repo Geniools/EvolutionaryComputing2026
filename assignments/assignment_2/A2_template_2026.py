@@ -73,8 +73,6 @@ MODE: ViewerTypes = "simple"  # see run_experiment() for the options
 # --- EXPERIMENT SIZE --- #
 population_size = 100
 num_generations = 5
-num_elite = 1
-
 
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
