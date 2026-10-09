@@ -1,11 +1,14 @@
+import numpy as np
 import mujoco as mj
 from mujoco import viewer
 
-from config import SIM_DURATION, SPAWN_POS, ViewerTypes
+from config import REACH_RADIUS, SIM_DURATION, SPAWN_POS, TARGET_POSITION, ViewerTypes
+
 from environment.controller import Genotype, decode_genotype, nn_controller
 from environment.fitness import fitness_function, get_core_position
 from environment.world import build_robot, build_world
 
+from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
@@ -54,7 +57,23 @@ def run_simulation(
     output_size = model.nu
     weights = decode_genotype(genotype, input_size, output_size)
 
+    target = np.asarray(TARGET_POSITION)
+    reach_time: float | None = None
+    min_dist = float("inf")
+    path_length = 0.0
+    prev_position = get_core_position(data)
+
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
+        # "nonlocal" allows the callback to modify variables in the enclosing scope (run_simulation function)
+        nonlocal reach_time, min_dist, path_length, prev_position
+        position = get_core_position(d)
+        dist = distance_to_target(position, target)
+        min_dist = min(min_dist, dist)
+        # distance_to_target is a plain xy distance, so it also measures a step.
+        path_length += distance_to_target(position, prev_position)
+        prev_position = position
+        if reach_time is None and dist <= REACH_RADIUS:
+            reach_time = float(d.time)
         actions = nn_controller(m, d, weights)
 
         # Blown-up weights silently write NaN into d.ctrl (template warning).
@@ -89,4 +108,10 @@ def run_simulation(
     mj.set_mjcb_control(None)
 
     final_position = get_core_position(data)
-    return fitness_function(initial_position, final_position)
+    return fitness_function(
+            initial_position,
+            final_position,
+            time_to_target=reach_time,
+            min_distance_to_target=min_dist,
+            path_length=path_length,
+    )
