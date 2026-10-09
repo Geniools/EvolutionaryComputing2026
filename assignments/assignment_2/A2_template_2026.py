@@ -26,7 +26,6 @@ view or record an individual controller.
 # Standard library
 from pathlib import Path
 from typing import Literal
-import random
 
 # Third-party libraries
 import mujoco as mj
@@ -42,7 +41,7 @@ from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
-from ariel.ec import Individual, Population, set_seed
+from ariel.ec import set_seed
 
 # Type aliases
 type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
@@ -231,43 +230,6 @@ def fitness_function(
     """
     target = np.asarray(TARGET_POSITION)
     return float(np.linalg.norm(final_position[:2] - target[:2]))
-
-
-def _fitness_of(individual: Individual) -> float:
-    """Fitness of an individual, where "not scored yet" is the worst possible."""
-    if individual.fitness_ is None:
-        return float("inf")
-    return individual.fitness_
-
-
-def survivor_selection(
-        population: Population,
-        *,
-        population_size: int,
-        cull_mode: str = "tournament",
-        num_elites: int = 1,
-) -> Population:
-    """Cull the worse of two random non-elites until the target size is reached.
-
-    Lower fitness is better. The best `num_elites` individuals are protected.
-    """
-    if cull_mode != "tournament":
-        raise ValueError("Only tournament culling is supported.")
-
-    alive = population.alive.to_list()
-    number_to_kill = max(0, len(alive) - population_size)
-
-    # Sort best to worst, then exclude elites from the candidate pool.
-    ranked = sorted(alive, key=_fitness_of)
-    pool = ranked[num_elites:]
-
-    for _ in range(number_to_kill):
-        candidates = random.sample(pool, min(2, len(pool)))
-        loser = max(candidates, key=_fitness_of)
-        loser.alive = False
-        pool.remove(loser)
-
-    return population
 
 
 # ============================================================================ #

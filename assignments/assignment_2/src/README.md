@@ -24,6 +24,7 @@ src/
     ├── selection.py      #   parent_selection, survivor_selection
     ├── crossover.py       #   recombination operator
     ├── mutation.py        #   mutation operator
+    ├── statistics.py      #   best/mean/worst fitness per generation
     └── baseline.py        #   random-search comparison
 ```
 

@@ -11,6 +11,8 @@ import os
 import random
 from pathlib import Path
 
+import numpy as np
+
 from ariel import console
 from ariel.ec import EA, EAOperation, Population, config as ea_config, set_seed
 
@@ -21,10 +23,12 @@ from evolution.evaluation import evaluate
 from evolution.genotype import make_individual
 from evolution.mutation import mutate
 from evolution.selection import parent_selection, survivor_selection
+from evolution.statistics import record_stats
 
 # ARIEL/EA write to "__data__" in the working directory - land in
 # assignment_2/__data__ regardless of where this script is invoked from.
 os.chdir(Path(__file__).resolve().parent.parent)
+
 
 def build_initial_population(input_size: int, output_size: int) -> Population:
     """Create the starting population of randomly initialised individuals."""
@@ -33,25 +37,10 @@ def build_initial_population(input_size: int, output_size: int) -> Population:
     )
 
 
-def record_stats(population: Population, *, log: list[dict]) -> Population:
-    """Record best, mean, and worst fitness among living individuals."""
-    fitnesses = [ind.fitness for ind in population.alive if ind.fitness_ is not None]
-    if not fitnesses:
-        raise ValueError("No living, evaluated individuals to record")
-
-    log.append({
-        "generation": len(log),
-        "best": min(fitnesses),
-        "mean": sum(fitnesses) / len(fitnesses),
-        "worst": max(fitnesses),
-        "population_size": len(fitnesses),
-    })
-    return population
-
-
 def run_evolution(seed: int, db_path: Path) -> list[dict]:
     """Run one seed and return its generation statistics."""
     random.seed(seed)
+    np.random.seed(seed)
     set_seed(seed)
 
     input_size, output_size = get_io_sizes()
@@ -69,7 +58,7 @@ def run_evolution(seed: int, db_path: Path) -> list[dict]:
         EAOperation(crossover),
         EAOperation(mutate),
         EAOperation(evaluate),
-        EAOperation(survivor_selection),
+        EAOperation(survivor_selection, population_size=POPULATION_SIZE),
         EAOperation(record_stats, log=log),
     ]
 
