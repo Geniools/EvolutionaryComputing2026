@@ -1,6 +1,8 @@
-from typing import Literal
+import os
+from typing import Literal, cast
 
 type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
+type CrossoverTypes = Literal["none", "uniform", "blend", "neuron"]
 
 # -- Reproducibility ----------------------------------------------------------
 SEED: int = 42
@@ -23,6 +25,13 @@ HIDDEN_SIZE: int = 6
 # -- EA hyperparameters -----------------------------------------------------
 POPULATION_SIZE: int = 100
 NUM_GENERATIONS: int = 20
+
+# -- Crossover (see evolution/crossover.py) -----------------------------------
+# Variant under study; override per run without editing code:
+#   PowerShell: $env:CROSSOVER = "blend"; python src/main.py
+#   bash:       CROSSOVER=blend python src/main.py
+CROSSOVER_TYPE: CrossoverTypes = cast("CrossoverTypes", os.environ.get("CROSSOVER", "uniform"))
+BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child may land
 
 # -- Baseline -----------------------------------------------------------------
 # "Random search with the same evaluation budget" (template, YOUR JOB section).
