@@ -89,7 +89,10 @@ def main() -> None:
     with results_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
             file,
-            fieldnames=["seed", "generation", "best", "mean", "worst", "population_size"],
+            fieldnames=[
+                "seed", "generation", "best", "mean", "worst",
+                "fitness_std", "population_size",
+            ],
         )
         writer.writeheader()
 

@@ -1,10 +1,12 @@
 """Per-generation statistics for Assignment 2 EA runs."""
 
+from statistics import pstdev
+
 from ariel.ec import Population
 
 
 def record_stats(population: Population, *, log: list[dict]) -> Population:
-    """Record best, mean, and worst fitness among living individuals."""
+    """Record fitness statistics among living individuals."""
     fitnesses = [ind.fitness for ind in population.alive if ind.fitness_ is not None]
     if not fitnesses:
         raise ValueError("No living, evaluated individuals to record")
@@ -14,6 +16,7 @@ def record_stats(population: Population, *, log: list[dict]) -> Population:
         "best": min(fitnesses),
         "mean": sum(fitnesses) / len(fitnesses),
         "worst": max(fitnesses),
+        "fitness_std": pstdev(fitnesses),
         "population_size": len(fitnesses),
     })
     return population
