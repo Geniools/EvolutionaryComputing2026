@@ -36,4 +36,4 @@ BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child
 # -- Baseline -----------------------------------------------------------------
 # "Random search with the same evaluation budget" (template, YOUR JOB section).
 # Should equal POPULATION_SIZE * NUM_GENERATIONS once those are set.
-BASELINE_NUM_EVALUATIONS: int | None = None  # TODO: decide
+BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE * NUM_GENERATIONS
