@@ -1,12 +1,14 @@
 """Aggregate runs across seeds: fitness plot, summary table, statistical tests.
 
-Usage (from src/):
-    python analysis/analyze.py results/ --out figures/
-    python analysis/analyze.py results/ --out figures/ --configs ea_main baseline_random --tag main
-    python analysis/analyze.py results/ --out figures/ --configs xover_uniform xover_blend xover_sbx xover_none --tag xover
+Usage (from assignment_2/):
+    python src/analysis/analyze.py __data__/a2_experiments --out __data__/a2_experiments/figures
+    python src/analysis/analyze.py results/ --out figures/
+    python src/analysis/analyze.py results/ --out figures/ --configs ea_main baseline_random --tag main
+    python src/analysis/analyze.py results/ --out figures/ --configs xover_uniform xover_blend xover_sbx xover_none --tag xover
 
-Input layout (proposal):  results/<config>/seed_<n>/database.db
-                                   results/<config>/seed_<n>/evaluations.csv (random search)
+Inputs:  __data__/a2_experiments/results.csv (main.py output)
+         results/<config>/seed_<n>/database.db
+         results/<config>/seed_<n>/evaluations.csv (random search)
 Fitness: LOWER IS BETTER, so best = min and worst = max.
 
 Layer 1 (reader):  load_run, load_evaluations_csv, load_all  -> tidy DataFrames
@@ -112,13 +114,28 @@ def load_evaluations_csv(csv_path: str | Path, evals_per_gen: int) -> pd.DataFra
 
 
 def load_all(results_dir: str | Path, evals_per_gen: int = POPULATION_SIZE) -> pd.DataFrame:
-    """Load every results/<config>/seed_<n>/ run into one DataFrame.
+    """Load main.py's CSV or every results/<config>/seed_<n>/ run.
 
     Columns: config, seed, generation, best, mean, worst.
-    A run is read from database.db if present, otherwise from evaluations.csv.
+    Nested runs use database.db when present, otherwise evaluations.csv.
     """
+    results_dir = Path(results_dir)
+    main_csv = results_dir / "results.csv"
+    if main_csv.exists():
+        # main.py already logged one row per generation and seed. Reading it
+        # directly avoids reconstructing populations from the SQLite history.
+        runs = pd.read_csv(main_csv)
+        required = {"seed", "generation", "best", "mean", "worst"}
+        missing = required - set(runs.columns)
+        if missing:
+            raise ValueError(f"{main_csv} is missing columns: {sorted(missing)}")
+        if runs.empty:
+            raise ValueError(f"{main_csv} has no results")
+        runs.insert(0, "config", "ea_main")
+        return runs
+
     frames = []
-    for seed_dir in sorted(Path(results_dir).glob("*/seed_*")):
+    for seed_dir in sorted(results_dir.glob("*/seed_*")):
         config = seed_dir.parent.name
         seed = int(seed_dir.name.removeprefix("seed_"))
         if (seed_dir / "database.db").exists():
@@ -229,13 +246,16 @@ def stats_tests(df: pd.DataFrame) -> pd.DataFrame:
             "n_a": len(fa), "n_b": len(fb),
             "U": u, "p_value": p, "p_bonferroni": min(1.0, p * len(pairs)),
         })
-    return pd.DataFrame(records)
+    return pd.DataFrame(records, columns=[
+        "config_a", "config_b", "median_a", "median_b",
+        "n_a", "n_b", "U", "p_value", "p_bonferroni",
+    ])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("results_dir", help="folder containing <config>/seed_<n>/")
+    parser.add_argument("results_dir", help="main.py output folder or folder containing <config>/seed_<n>/")
     parser.add_argument("--out", default="figures/", help="output folder (default: figures/)")
     parser.add_argument("--configs", nargs="+", help="only use these configs")
     parser.add_argument("--tag", default="", help="suffix for output file names, e.g. 'xover'")
@@ -252,6 +272,8 @@ def main() -> None:
         if missing:
             print(f"warning: no runs for {sorted(missing)}")
         df = df[df["config"].isin(args.configs)]
+        if df.empty:
+            parser.error("none of the requested configs have results")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
