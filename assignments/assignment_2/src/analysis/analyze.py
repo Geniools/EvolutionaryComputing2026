@@ -1,15 +1,17 @@
 """Aggregate runs across seeds: fitness plot, summary table, statistical tests.
 
 Usage (from assignment_2/):
-    python src/analysis/analyze.py __data__/a2_experiments --out __data__/a2_experiments/figures
+    python src/analysis/analyze.py __data__/a2_experiments/uniform_1 --out __data__/a2_experiments/uniform_1/figures
     python src/analysis/analyze.py results/ --out figures/
     python src/analysis/analyze.py results/ --out figures/ --configs ea_main baseline_random --tag main
     python src/analysis/analyze.py results/ --out figures/ --configs xover_uniform xover_blend xover_sbx xover_none --tag xover
 
-Inputs:  __data__/a2_experiments/results.csv (main.py output)
+Inputs:  __data__/a2_experiments/<crossover>_<iteration>/results.csv (main.py output)
          results/<config>/seed_<n>/database.db
          results/<config>/seed_<n>/evaluations.csv (random search)
 Fitness: LOWER IS BETTER, so best = min and worst = max.
+Choose the numbered execution folder to analyze; older results.csv files
+directly inside a2_experiments can still be analyzed by passing that folder.
 
 Layer 1 (reader):  load_run, load_evaluations_csv, load_all  -> tidy DataFrames
 Layer 2 (outputs): plot_fitness, summary_table, stats_tests  -> files in --out

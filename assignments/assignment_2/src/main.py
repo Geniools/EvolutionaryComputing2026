@@ -2,11 +2,14 @@
 
 Use python main.py for seeds 1 through 5 by default, or pass --seeds in the
 terminal to choose single or multiple different seeds. 
-Each seed gets its own database, generation statistics go to one CSV.
+Each execution gets a numbered folder per crossover operator, such as
+__data__/a2_experiments/uniform_1/. It contains settings.json, results.csv,
+and a database per seed. Previous executions are preserved.
 """
 
 import argparse
 import csv
+import json
 import os
 import random
 from pathlib import Path
@@ -16,18 +19,41 @@ import numpy as np
 from ariel import console
 from ariel.ec import EA, EAOperation, Population, config as ea_config, set_seed
 
-from config import NUM_GENERATIONS, POPULATION_SIZE
+from config import BLEND_ALPHA, CROSSOVER_TYPE, HIDDEN_SIZE, NUM_GENERATIONS, POPULATION_SIZE
 from environment.simulation import get_io_sizes
 from evolution.crossover import crossover
 from evolution.evaluation import evaluate
 from evolution.genotype import make_individual
-from evolution.mutation import mutate
+from evolution.mutation import MUTATION_RATE, MUTATION_SIGMA, mutate
 from evolution.selection import parent_selection, survivor_selection
 from evolution.statistics import record_stats
 
 # ARIEL/EA write to "__data__" in the working directory - land in
 # assignment_2/__data__ regardless of where this script is invoked from.
 os.chdir(Path(__file__).resolve().parent.parent)
+
+
+def create_experiment_dir(root: Path, crossover_type: str) -> Path:
+    """Create the next numbered folder for this crossover operator."""
+    root.mkdir(parents=True, exist_ok=True)
+    prefix = f"{crossover_type}_"
+    iterations = [
+        int(path.name[len(prefix):])
+        for path in root.iterdir()
+        if path.is_dir()
+        and path.name.startswith(prefix)
+        and path.name[len(prefix):].isdigit()
+    ]
+    iteration = max(iterations, default=0) + 1
+
+    while True:
+        output_dir = root / f"{prefix}{iteration}"
+        try:
+            output_dir.mkdir()
+        except FileExistsError:
+            iteration += 1
+        else:
+            return output_dir
 
 
 def build_initial_population(input_size: int, output_size: int) -> Population:
@@ -82,11 +108,27 @@ def main() -> None:
     if len(seeds) != len(set(seeds)):
         parser.error("Each seed must be listed only once")
 
-    output_dir = Path("__data__") / "a2_experiments"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = create_experiment_dir(
+        Path("__data__") / "a2_experiments", CROSSOVER_TYPE,
+    )
     results_path = output_dir / "results.csv"
+    console.log(f"experiment output: {output_dir}")
 
-    with results_path.open("w", newline="", encoding="utf-8") as file:
+    settings = {
+        "crossover_type": CROSSOVER_TYPE,
+        "seeds": seeds,
+        "num_generations": NUM_GENERATIONS,
+        "population_size": POPULATION_SIZE,
+        "hidden_size": HIDDEN_SIZE,
+        "blend_alpha": BLEND_ALPHA,
+        "mutation_rate": MUTATION_RATE,
+        "mutation_sigma": MUTATION_SIGMA,
+    }
+    with (output_dir / "settings.json").open("x", encoding="utf-8") as file:
+        json.dump(settings, file, indent=2)
+        file.write("\n")
+
+    with results_path.open("x", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
             file,
             fieldnames=[
