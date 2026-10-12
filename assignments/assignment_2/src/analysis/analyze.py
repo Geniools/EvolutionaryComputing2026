@@ -1,6 +1,7 @@
 """Aggregate runs across seeds: fitness plot, summary table, statistical tests.
 
 Usage (from assignment_2/):
+    python src/analysis/analyze.py __data__/a2_experiments --out __data__/a2_experiments/figures
     python src/analysis/analyze.py __data__/a2_experiments/uniform_1 --out __data__/a2_experiments/uniform_1/figures
     python src/analysis/analyze.py results/ --out figures/
     python src/analysis/analyze.py results/ --out figures/ --configs ea_main baseline_random --tag main
@@ -39,6 +40,13 @@ from config import POPULATION_SIZE
 # Fixed colour per config, so a config keeps its colour in every plot
 # (also when --configs drops some). Baseline is a neutral grey reference.
 CONFIG_COLORS: dict[str, str] = {
+    # main.py method names
+    "baseline": "#7f7f7f",
+    "none": "#e34948",
+    "uniform": "#eb6834",
+    "blend": "#1baf7a",
+    "neuron": "#4a3aa7",
+    # results/<config>/ layout names
     "baseline_random": "#7f7f7f",
     "ea_main": "#2a78d6",
     "xover_uniform": "#eb6834",
@@ -115,8 +123,24 @@ def load_evaluations_csv(csv_path: str | Path, evals_per_gen: int) -> pd.DataFra
     return pd.DataFrame(records)
 
 
+def load_results_csv(csv_path: Path, config: str) -> pd.DataFrame:
+    """One results.csv written by main.py, labelled with its config name."""
+    runs = pd.read_csv(csv_path)
+    required = {"seed", "generation", "best", "mean", "worst"}
+    missing = required - set(runs.columns)
+    if missing:
+        raise ValueError(f"{csv_path} is missing columns: {sorted(missing)}")
+    if runs.empty:
+        raise ValueError(f"{csv_path} has no results")
+    runs.insert(0, "config", config)
+    return runs
+
+
 def load_all(results_dir: str | Path, evals_per_gen: int = POPULATION_SIZE) -> pd.DataFrame:
-    """Load main.py's CSV or every results/<config>/seed_<n>/ run.
+    """Load main.py's CSV(s) or every results/<config>/seed_<n>/ run.
+
+    `results_dir` may be one main.py execution folder (uniform_1/), their
+    parent (a2_experiments/, latest iteration of every method), or results/.
 
     Columns: config, seed, generation, best, mean, worst.
     Nested runs use database.db when present, otherwise evaluations.csv.
@@ -126,15 +150,22 @@ def load_all(results_dir: str | Path, evals_per_gen: int = POPULATION_SIZE) -> p
     if main_csv.exists():
         # main.py already logged one row per generation and seed. Reading it
         # directly avoids reconstructing populations from the SQLite history.
-        runs = pd.read_csv(main_csv)
-        required = {"seed", "generation", "best", "mean", "worst"}
-        missing = required - set(runs.columns)
-        if missing:
-            raise ValueError(f"{main_csv} is missing columns: {sorted(missing)}")
-        if runs.empty:
-            raise ValueError(f"{main_csv} has no results")
-        runs.insert(0, "config", "ea_main")
-        return runs
+        return load_results_csv(main_csv, "ea_main")
+
+    # main.py's parent folder: <method>_<iteration>/results.csv per method.
+    # Compare the methods using the latest iteration of each.
+    latest: dict[str, tuple[int, Path]] = {}
+    for csv_path in results_dir.glob("*_*/results.csv"):
+        method, _, iteration = csv_path.parent.name.rpartition("_")
+        if iteration.isdigit() and int(iteration) >= latest.get(method, (0, csv_path))[0]:
+            latest[method] = (int(iteration), csv_path)
+    if latest:
+        for method, (iteration, _) in sorted(latest.items()):
+            print(f"using {method}_{iteration}")
+        return pd.concat(
+            [load_results_csv(path, method) for method, (_, path) in latest.items()],
+            ignore_index=True,
+        )
 
     frames = []
     for seed_dir in sorted(results_dir.glob("*/seed_*")):
