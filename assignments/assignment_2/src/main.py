@@ -9,6 +9,9 @@ __data__/a2_experiments/uniform_1/ or __data__/a2_experiments/baseline_1/.
 It contains settings.json, results.csv, and per seed either a database (EA)
 or seed_<n>_evaluations.csv with every evaluated genotype (baseline).
 Previous executions are preserved.
+When all methods are done, the analysis scripts write plots and statistics
+to __data__/a2_experiments/figures/, and a video of the best controller is
+saved in every EA method's folder.
 """
 
 import argparse
@@ -16,6 +19,8 @@ import csv
 import json
 import os
 import random
+import subprocess
+import sys
 from contextlib import nullcontext
 from multiprocessing import Pool
 from pathlib import Path
@@ -44,6 +49,7 @@ os.chdir(Path(__file__).resolve().parent.parent)
 
 BASELINE = "baseline"
 METHODS: list[str] = [BASELINE, *OPERATORS]  # run order: baseline first, then each crossover
+SRC = Path(__file__).resolve().parent
 
 
 def create_experiment_dir(root: Path, crossover_type: str) -> Path:
@@ -159,7 +165,7 @@ def run_evolution(seed: int, db_path: Path, crossover_type: str) -> list[dict]:
     return log
 
 
-def run_method(method: str, seeds: list[int]) -> None:
+def run_method(method: str, seeds: list[int]) -> Path:
     """Run one method for the requested seeds and save one row per generation and seed."""
     output_dir = create_experiment_dir(Path("__data__") / "a2_experiments", method)
     results_path = output_dir / "results.csv"
@@ -201,6 +207,19 @@ def run_method(method: str, seeds: list[int]) -> None:
             console.log(f"{method} seed {seed}: final best fitness {log[-1]['best']:.4f}")
 
     console.log(f"saved {results_path}")
+    return output_dir
+
+
+def write_outputs(output_dirs: dict[str, Path]) -> None:
+    """Plots and statistics over all methods, and a replay video per EA method."""
+    root = (Path("__data__") / "a2_experiments").resolve()
+    for script in ("analyze.py", "paired_tests.py"):
+        subprocess.run([sys.executable, SRC / "analysis" / script, root, "--out", root / "figures"])
+    for method, output_dir in output_dirs.items():
+        if method != BASELINE:  # the baseline has no database to replay from
+            folder = output_dir.resolve()
+            subprocess.run([sys.executable, SRC / "replay_best.py", "--dir", folder,
+                            "--mode", "video", "--video-folder", folder])
 
 
 def main() -> None:
@@ -216,8 +235,8 @@ def main() -> None:
 
     # Same results either way: simulations use no randomness, only run in parallel.
     with Pool(args.workers) if args.workers > 1 else nullcontext() as evaluation.pool:
-        for method in args.methods:
-            run_method(method, args.seeds)
+        output_dirs = {method: run_method(method, args.seeds) for method in args.methods}
+    write_outputs(output_dirs)
 
 
 if __name__ == "__main__":

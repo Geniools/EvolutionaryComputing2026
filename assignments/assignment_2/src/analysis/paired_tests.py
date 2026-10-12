@@ -12,8 +12,9 @@ Metrics:    final_best   = best fitness the run found
                            run that improves earlier scores better
 Test:       two-sided Wilcoxon signed-rank on those diffs (no normality assumed).
 Correction: Holm over all tests run here (never weaker than Bonferroni).
-Needs >= 8 seeds for p_holm < 0.05 to be reachable with the default 6 tests;
-10 is a sensible minimum.
+Needs >= 9 seeds for p_holm < 0.05 to be reachable with the default 8 tests
+(4 methods x 2 metrics); 10 is a sensible minimum.
+Writes paired_tests.csv and a readable paired_tests.txt.
 """
 
 import argparse
@@ -23,7 +24,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 
-from analyze import load_all
+from analyze import ALPHA, load_all, write_readable
 
 # One number per run, from its per-generation best fitness.
 METRICS: dict[str, str] = {
@@ -60,7 +61,23 @@ def paired_tests(df: pd.DataFrame, control: str, methods: list[str]) -> pd.DataF
             })
     table = pd.DataFrame(records)
     table["p_holm"] = holm(table["p_value"].tolist())
+    winner = table["method"].where(table["median_diff"] < 0, table["control"])  # lower is better
+    table["result"] = (winner + " better").where(table["p_holm"] < ALPHA, "no significant difference")
     return table
+
+
+LEGEND = f"""
+Wilcoxon signed-rank test (two-sided), paired per seed: each method against the control.
+Every seed starts all methods from the same initial population. LOWER FITNESS IS BETTER.
+  metric          final_best = best fitness of the run; average_best = best-so-far
+                  averaged over all generations (rewards improving early)
+  method_better   number of seeds where the method beat the control
+  control_better  number of seeds where the control beat the method
+  median_diff     median over seeds of (method - control); positive = method is worse
+  p_value         chance of differences this consistent if both were equally good
+  p_holm          p_value corrected (Holm) for running all the tests in this table
+  result          significant when p_holm < {ALPHA}; names the better of the two
+"""
 
 
 def main() -> None:
@@ -70,12 +87,12 @@ def main() -> None:
     parser.add_argument("--out", default="figures/", help="output folder (default: figures/)")
     parser.add_argument("--control", default="none", help="method the others are compared to")
     parser.add_argument("--methods", nargs="+",
-                        help="methods to compare to the control (default: all except baseline)")
+                        help="methods to compare to the control (default: all others)")
     args = parser.parse_args()
 
     df = load_all(args.results_dir)
     present = set(df["config"])
-    methods = args.methods or sorted(present - {args.control, "baseline"})
+    methods = args.methods or sorted(present - {args.control})
     missing = {args.control, *methods} - present
     if missing:
         parser.error(f"no runs for {sorted(missing)}")
@@ -84,6 +101,7 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     table.to_csv(out / "paired_tests.csv", index=False)
+    write_readable(table, out / "paired_tests.txt", LEGEND)
     print(table.to_string(index=False, float_format="%.4f"))
     print(f"wrote {out / 'paired_tests.csv'}")
 

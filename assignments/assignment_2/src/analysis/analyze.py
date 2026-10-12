@@ -16,6 +16,7 @@ directly inside a2_experiments can still be analyzed by passing that folder.
 
 Layer 1 (reader):  load_run, load_evaluations_csv, load_all  -> tidy DataFrames
 Layer 2 (outputs): plot_fitness, summary_table, stats_tests  -> files in --out
+                   (stats_tests.txt is the readable version of the .csv)
 """
 
 import argparse
@@ -30,12 +31,16 @@ matplotlib.use("Agg")  # headless: write files, never open a window
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
 from scipy.stats import mannwhitneyu
 
 # Make src/ importable (for config.py) when run as `python analysis/analyze.py`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import POPULATION_SIZE
+from config import NUM_SEED_PLOTS, POPULATION_SIZE
+
+ALPHA: float = 0.05  # significance level for the `result` column
 
 # Fixed colour per config, so a config keeps its colour in every plot
 # (also when --configs drops some). Baseline is a neutral grey reference.
@@ -208,42 +213,51 @@ def final_best(df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 
 
-def plot_fitness(df: pd.DataFrame, out_stem: Path, show_mean: bool = False) -> None:
-    """Mean (over seeds) of the per-generation best, with a +-1 std band.
+def plot_fitness(df: pd.DataFrame, out_stem: Path) -> None:
+    """One panel per config: mean of the per-generation best with a +-1 std band.
 
-    Sized for one GECCO column (3.33 in wide). Writes <out_stem>.png and .pdf.
+    Grey lines are the single runs of the first NUM_SEED_PLOTS seeds, to show
+    what one run looks like next to the average. All panels share the y-axis.
+    Sized for the full GECCO text width (7 in). Writes <out_stem>.png and .pdf.
     """
-    plt.rcParams.update({"font.size": 8, "axes.titlesize": 8, "legend.fontsize": 7})
-    fig, ax = plt.subplots(figsize=(3.4, 2.5))
+    plt.rcParams.update({"font.size": 8, "axes.titlesize": 8})
+    configs = ordered_configs(df)
+    seeds = sorted(df["seed"].unique())[:NUM_SEED_PLOTS]
+    fig, axes = plt.subplots(1, len(configs), figsize=(7.0, 1.9),
+                             sharex=True, sharey=True, squeeze=False)
 
     extra = iter(EXTRA_COLORS)
-    for config in ordered_configs(df):
+    for ax, config in zip(axes[0], configs, strict=True):
         color = CONFIG_COLORS.get(config) or next(extra, "black")
-        per_gen = df[df["config"] == config].groupby("generation")
-        best_mean = per_gen["best"].mean()
-        best_std = per_gen["best"].std().fillna(0.0)  # std is NaN with 1 seed
-        n_seeds = df.loc[df["config"] == config, "seed"].nunique()
+        runs = df[df["config"] == config]
+        best_mean = runs.groupby("generation")["best"].mean()
+        best_std = runs.groupby("generation")["best"].std().fillna(0.0)
 
-        ax.plot(best_mean.index, best_mean, color=color, linewidth=1.5,
-                label=f"{config} (n={n_seeds})")
         ax.fill_between(best_mean.index, best_mean - best_std, best_mean + best_std,
-                        color=color, alpha=0.2, linewidth=0)
-        if show_mean:
-            pop_mean = per_gen["mean"].mean()
-            ax.plot(pop_mean.index, pop_mean, color=color, linewidth=0.8, linestyle="--")
+                        color=color, alpha=0.25, linewidth=0)
+        for seed in seeds:
+            run = runs[runs["seed"] == seed]
+            ax.plot(run["generation"], run["best"], color="#8c8c8c", linewidth=0.6)
+        ax.plot(best_mean.index, best_mean, color=color, linewidth=1.4)
 
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # no "2.5" generations
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Best fitness (lower is better)")
-    ax.grid(axis="y", color="#dddddd", linewidth=0.5)
-    ax.spines[["top", "right"]].set_visible(False)
-    title = "mean $\\pm$ 1 std over seeds"
-    if show_mean:
-        title += "; dashed = population mean"
-    ax.set_title(title, loc="left", color="#555555")
-    # Legend above the axes so it never hides the curves.
-    ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.08), ncol=2, frameon=False,
-              borderaxespad=0.0, handlelength=1.5, columnspacing=1.0)
+        ax.set_title(f"{config}\n{best_mean.iloc[-1]:.2f} $\\pm$ {best_std.iloc[-1]:.2f}", color=color)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=3, integer=True))
+        ax.grid(axis="y", color="#dddddd", linewidth=0.5)
+        ax.spines[["top", "right"]].set_visible(False)
+
+    axes[0, 0].set_ylabel("Best fitness\n(lower is better)")
+    axes[0, len(configs) // 2].set_xlabel("Generation")
+    # One shared legend in neutral colours: every panel uses the same three elements.
+    fig.legend(
+        handles=[
+            Line2D([], [], color="black", linewidth=1.4, label=f"mean of {df['seed'].nunique()} seeds"),
+            Patch(facecolor="black", alpha=0.25, linewidth=0, label="$\\pm$ 1 std"),
+            Line2D([], [], color="#8c8c8c", linewidth=0.6,
+                   label=f"single runs (seeds {', '.join(map(str, seeds))})"),
+        ],
+        loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=3, frameon=False,
+        fontsize=7, handlelength=1.5, columnspacing=1.5,
+    )
 
     for suffix in (".png", ".pdf"):
         fig.savefig(out_stem.with_suffix(suffix), dpi=300, bbox_inches="tight")
@@ -279,10 +293,31 @@ def stats_tests(df: pd.DataFrame) -> pd.DataFrame:
             "n_a": len(fa), "n_b": len(fb),
             "U": u, "p_value": p, "p_bonferroni": min(1.0, p * len(pairs)),
         })
+        better = a if fa.median() < fb.median() else b  # lower is better
+        records[-1]["result"] = (f"{better} better" if records[-1]["p_bonferroni"] < ALPHA
+                                 else "no significant difference")
     return pd.DataFrame(records, columns=[
         "config_a", "config_b", "median_a", "median_b",
-        "n_a", "n_b", "U", "p_value", "p_bonferroni",
+        "n_a", "n_b", "U", "p_value", "p_bonferroni", "result",
     ])
+
+
+def write_readable(table: pd.DataFrame, path: Path, legend: str) -> None:
+    """Write `table` as aligned plain text below a short explanation of its columns."""
+    text = table.to_string(index=False, float_format="%.4f")
+    path.write_text(f"{legend.strip()}\n\n{text}\n", encoding="utf-8")
+
+
+STATS_LEGEND = f"""
+Mann-Whitney U test (two-sided) on the final best fitness of every pair of methods.
+The seeds of the two methods are treated as two independent groups. LOWER FITNESS IS BETTER.
+  median_a/b    median final best fitness of each method over its seeds
+  n_a/b         number of seeds
+  U             test statistic
+  p_value       chance of a difference this large if the methods were equally good
+  p_bonferroni  p_value * number of pairs (max 1): corrected for testing many pairs
+  result        significant when p_bonferroni < {ALPHA}; names the method with the lower median
+"""
 
 
 def main() -> None:
@@ -295,8 +330,6 @@ def main() -> None:
     parser.add_argument("--evals-per-gen", type=int, default=POPULATION_SIZE,
                         help="evaluations per pseudo-generation for random search "
                              f"(default: POPULATION_SIZE={POPULATION_SIZE})")
-    parser.add_argument("--show-mean", action="store_true",
-                        help="also draw the population mean as a dashed line")
     args = parser.parse_args()
 
     df = load_all(args.results_dir, args.evals_per_gen)
@@ -312,7 +345,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     suffix = f"_{args.tag}" if args.tag else ""
 
-    plot_fitness(df, out / f"fitness_over_generations{suffix}", show_mean=args.show_mean)
+    plot_fitness(df, out / f"fitness_over_generations{suffix}")
 
     table = summary_table(df)
     table.to_csv(out / f"summary_table{suffix}.csv")
@@ -324,7 +357,9 @@ def main() -> None:
         escape=True,  # config names contain '_'
     )
 
-    stats_tests(df).to_csv(out / f"stats_tests{suffix}.csv", index=False)
+    tests = stats_tests(df)
+    tests.to_csv(out / f"stats_tests{suffix}.csv", index=False)
+    write_readable(tests, out / f"stats_tests{suffix}.txt", STATS_LEGEND)
 
     print(table.to_string(float_format="%.3f"))
     print(f"wrote outputs to {out}/")

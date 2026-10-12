@@ -24,13 +24,16 @@ HIDDEN_SIZE: int = 6
 
 # -- EA hyperparameters -----------------------------------------------------
 POPULATION_SIZE: int = 100
-NUM_GENERATIONS: int = 30
+NUM_GENERATIONS: int = 100
 
 # -- Crossover (see evolution/crossover.py) -----------------------------------
 # Default variant for `crossover()` when called without `crossover_type`.
 # main.py ignores it and runs every variant in turn (see its --methods).
 CROSSOVER_TYPE: CrossoverTypes = cast("CrossoverTypes", os.environ.get("CROSSOVER", "uniform"))
 BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child may land
+
+# -- Analysis (see analysis/analyze.py) ------------------------------------------
+NUM_SEED_PLOTS: int = 3  # single runs drawn in grey in the fitness plot: the first N seeds
 
 # -- Baseline -----------------------------------------------------------------
 # "Random search with the same evaluation budget" (template, YOUR JOB section).
