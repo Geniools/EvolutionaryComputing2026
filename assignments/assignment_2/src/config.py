@@ -9,8 +9,8 @@ SEED: int = 42
 
 # -- Task -----------------------------------------------------------------
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]
-TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]
-SIM_DURATION: float = 15.0
+TARGET_POSITION: list[float] = [5.0, 0.0, 0.1]
+SIM_DURATION: float = 30.0
 REACH_RADIUS: float = 0.15  # metres: xy-distance within which the target counts as reached
 MODE: ViewerTypes = "launcher"
 
@@ -24,7 +24,15 @@ HIDDEN_SIZE: int = 6
 
 # -- EA hyperparameters -----------------------------------------------------
 POPULATION_SIZE: int = 100
-NUM_GENERATIONS: int = 20
+# Upper limit: a run stops earlier once the best fitness plateaus (below).
+NUM_GENERATIONS: int = 1000
+
+# -- Early stopping (plateau detection, see main.py) --------------------------
+# Stop when the best fitness has improved by less than PLATEAU_MIN_IMPROVEMENT
+# over the last PLATEAU_PATIENCE generations. Elitism keeps the best fitness
+# monotone, so this cannot trigger on a temporary dip.
+PLATEAU_PATIENCE: int = 50
+PLATEAU_MIN_IMPROVEMENT: float = 0.005
 
 # -- Crossover (see evolution/crossover.py) -----------------------------------
 # Variant under study; override per run without editing code:
@@ -33,7 +41,21 @@ NUM_GENERATIONS: int = 20
 CROSSOVER_TYPE: CrossoverTypes = cast("CrossoverTypes", os.environ.get("CROSSOVER", "uniform"))
 BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child may land
 
+# -- Mutation (see evolution/mutation.py) -------------------------------------
+# Standard deviation of the Gaussian noise added to a mutated gene.
+# The initial weights are drawn from N(0, 0.5) (evolution/genotype.py), so 0.25
+# is half the typical weight size: big enough to move, small enough to stay
+# near the parent. Chosen with a small sigma pilot: 0.02/0.1 improved slowly,
+# 0.25/0.5 faster and consistently, 1.0 erratically.
+MUTATION_SIGMA: float = 0.25
+
+# Per-gene probability of being mutated. With a genotype of 138 weights
+# (gecko: 15 inputs x 6 hidden + 6 hidden x 8 outputs), 0.1 changes ~14 genes
+# per child on average.
+MUTATION_RATE: float = 0.1
+
 # -- Baseline -----------------------------------------------------------------
-# "Random search with the same evaluation budget" (template, YOUR JOB section).
-# Should equal POPULATION_SIZE * NUM_GENERATIONS once those are set.
-BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE * NUM_GENERATIONS
+# Upper bound: with early stopping the EA may use fewer evaluations; the real
+# count is POPULATION_SIZE + generations_run * OFFSPRING_PER_GENERATION.
+OFFSPRING_PER_GENERATION: int = (POPULATION_SIZE // 2) // 2
+BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE + NUM_GENERATIONS * OFFSPRING_PER_GENERATION

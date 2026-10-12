@@ -1,6 +1,7 @@
 import random
 
 from ariel.ec import Individual, Population
+from ariel.ec.generators import _rng as rng
 
 
 def parent_selection(population: Population) -> Population:
@@ -13,7 +14,7 @@ def parent_selection(population: Population) -> Population:
         ind.tags = {"selected": False}  # Clear last generation's selection.
 
     candidates = [ind for ind in population.alive if ind.fitness_ is not None]
-    random.shuffle(candidates)
+    rng.shuffle(candidates)
 
     for index in range(0, len(candidates) - 1, 2):
         pair = candidates[index:index + 2]
@@ -40,7 +41,7 @@ def survivor_selection(
     """
     if population_size < 1 or not 0 <= num_elites <= population_size:
         raise ValueError(
-            "Require population_size >= 1 and 0 <= num_elites <= population_size"
+                "Require population_size >= 1 and 0 <= num_elites <= population_size"
         )
 
     alive = population.alive.to_list()
@@ -49,8 +50,8 @@ def survivor_selection(
     pool = ranked[num_elites:]
 
     for _ in range(number_to_kill):
-        candidates = random.sample(pool, min(2, len(pool)))
-        loser = max(candidates, key=_fitness_of)
+        picks = rng.choice(len(pool), size=min(2, len(pool)), replace=False)
+        loser = max((pool[i] for i in picks), key=_fitness_of)
         loser.alive = False
         pool.remove(loser)
 

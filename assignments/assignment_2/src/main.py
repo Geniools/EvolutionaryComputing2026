@@ -19,12 +19,22 @@ import numpy as np
 from ariel import console
 from ariel.ec import EA, EAOperation, Population, config as ea_config, set_seed
 
-from config import BLEND_ALPHA, CROSSOVER_TYPE, HIDDEN_SIZE, NUM_GENERATIONS, POPULATION_SIZE
+from config import (
+    BLEND_ALPHA,
+    CROSSOVER_TYPE,
+    HIDDEN_SIZE,
+    MUTATION_RATE,
+    MUTATION_SIGMA,
+    NUM_GENERATIONS,
+    PLATEAU_MIN_IMPROVEMENT,
+    PLATEAU_PATIENCE,
+    POPULATION_SIZE,
+)
 from environment.simulation import get_io_sizes
 from evolution.crossover import crossover
 from evolution.evaluation import evaluate
 from evolution.genotype import make_individual
-from evolution.mutation import MUTATION_RATE, MUTATION_SIGMA, mutate
+from evolution.mutation import mutate
 from evolution.selection import parent_selection, survivor_selection
 from evolution.statistics import record_stats
 
@@ -63,6 +73,14 @@ def build_initial_population(input_size: int, output_size: int) -> Population:
     )
 
 
+def has_plateaued(log: list[dict]) -> bool:
+    """True if the best fitness barely improved over the last PLATEAU_PATIENCE generations."""
+    if len(log) <= PLATEAU_PATIENCE:
+        return False
+    improvement = log[-PLATEAU_PATIENCE - 1]["best"] - log[-1]["best"]  # lower is better
+    return improvement < PLATEAU_MIN_IMPROVEMENT
+
+
 def run_evolution(seed: int, db_path: Path) -> list[dict]:
     """Run one seed and return its generation statistics."""
     random.seed(seed)
@@ -96,7 +114,13 @@ def run_evolution(seed: int, db_path: Path) -> list[dict]:
         db_file_path=db_path,
         db_handling="delete",
     )
-    ea.run()
+    # Step manually instead of ea.run() so the run can stop at a plateau;
+    # NUM_GENERATIONS is only the upper limit.
+    for _ in range(NUM_GENERATIONS):
+        ea.step()  # record_stats appends this generation to `log`
+        if has_plateaued(log):
+            console.log(f"plateau reached at generation {len(log) - 1}")
+            break
     return log
 
 
@@ -118,6 +142,8 @@ def main() -> None:
         "crossover_type": CROSSOVER_TYPE,
         "seeds": seeds,
         "num_generations": NUM_GENERATIONS,
+        "plateau_patience": PLATEAU_PATIENCE,
+        "plateau_min_improvement": PLATEAU_MIN_IMPROVEMENT,
         "population_size": POPULATION_SIZE,
         "hidden_size": HIDDEN_SIZE,
         "blend_alpha": BLEND_ALPHA,
