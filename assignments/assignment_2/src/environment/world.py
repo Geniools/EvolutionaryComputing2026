@@ -1,7 +1,6 @@
 import mujoco as mj
 
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
-# from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import gecko
 from ariel.simulation.environments import SimpleFlatWorld
 

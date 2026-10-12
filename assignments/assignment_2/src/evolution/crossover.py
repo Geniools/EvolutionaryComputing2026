@@ -78,13 +78,13 @@ if CROSSOVER_TYPE not in OPERATORS:
     raise ValueError(msg)
 
 
-def crossover(population: Population) -> Population:
+def crossover(population: Population, *, crossover_type: str = CROSSOVER_TYPE) -> Population:
     """Shuffle the selected parents, pair them up, add one child per pair.
 
     Parents are those tagged `selected` by `selection.parent_selection`;
     k parents give k // 2 children (an odd one out is skipped).
     """
-    operator = OPERATORS[CROSSOVER_TYPE]
+    operator = OPERATORS[crossover_type]
     parents = population.where(lambda ind: bool(ind.tags.get("selected", False))).to_list()
     rng.shuffle(parents)
 

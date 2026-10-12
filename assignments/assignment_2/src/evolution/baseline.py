@@ -3,7 +3,7 @@ from typing import cast
 from ariel.ec import Individual
 
 from environment.controller import Genotype
-from environment.simulation import run_simulation
+from evolution.evaluation import evaluate_genotypes
 from evolution.genotype import make_individual
 
 
@@ -11,23 +11,24 @@ def random_search(
         input_size: int,
         output_size: int,
         num_evaluations: int,
+        history: list[Individual] | None = None,
 ) -> Individual:
     """Evaluate `num_evaluations` random genotypes and return the best.
 
-    Draws a fresh individual via `genotype.make_individual`, scores it with
-    `simulation.run_simulation(..., mode="simple")`, and keeps the best
-    (lowest fitness) seen across `num_evaluations` draws.
+    Draws fresh individuals via `genotype.make_individual`, scores them with
+    `evaluation.evaluate_genotypes`, and keeps the best (lowest fitness)
+    seen across `num_evaluations` draws. If `history` is given, every
+    evaluated individual is appended to it in order.
     """
     if num_evaluations < 1:
         msg = "num_evaluations must be >= 1"
         raise ValueError(msg)
 
-    best: Individual | None = None
-    for _ in range(num_evaluations):
-        ind = make_individual(input_size, output_size)
-        ind.fitness = run_simulation(cast("Genotype", ind.genotype), mode="simple")
-        if best is None or ind.fitness < best.fitness:
-            best = ind
+    individuals = [make_individual(input_size, output_size) for _ in range(num_evaluations)]
+    fitnesses = evaluate_genotypes([cast("Genotype", ind.genotype) for ind in individuals])
+    for ind, fitness in zip(individuals, fitnesses, strict=True):
+        ind.fitness = fitness
+    if history is not None:
+        history.extend(individuals)
 
-    assert best is not None
-    return best
+    return min(individuals, key=lambda ind: ind.fitness)

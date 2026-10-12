@@ -17,7 +17,7 @@ from ariel.ec import EAOperation, Individual, Population, set_seed
 
 from evolution.mutation import mutate, mutate_genotype
 
-GENOTYPE = np.linspace(-1.0, 1.0, 138)  # same length as the gecko controller
+GENOTYPE = np.linspace(-1.0, 1.0, 114)  # same length as the gecko controller
 
 
 def test_same_shape() -> None:

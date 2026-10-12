@@ -5,7 +5,7 @@ type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
 type CrossoverTypes = Literal["none", "uniform", "blend", "neuron"]
 
 # -- Reproducibility ----------------------------------------------------------
-SEED: int = 42
+SEEDS: range = range(1, 6)  # seeds 1..5; default for main.py, override with --seeds
 
 # -- Task -----------------------------------------------------------------
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]
@@ -35,9 +35,8 @@ PLATEAU_PATIENCE: int = 50
 PLATEAU_MIN_IMPROVEMENT: float = 0.005
 
 # -- Crossover (see evolution/crossover.py) -----------------------------------
-# Variant under study; override per run without editing code:
-#   PowerShell: $env:CROSSOVER = "blend"; python src/main.py
-#   bash:       CROSSOVER=blend python src/main.py
+# Default variant for `crossover()` when called without `crossover_type`.
+# main.py ignores it and runs every variant in turn (see its --methods).
 CROSSOVER_TYPE: CrossoverTypes = cast("CrossoverTypes", os.environ.get("CROSSOVER", "uniform"))
 BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child may land
 
@@ -55,7 +54,8 @@ MUTATION_SIGMA: float = 0.25
 MUTATION_RATE: float = 0.1
 
 # -- Baseline -----------------------------------------------------------------
-# Upper bound: with early stopping the EA may use fewer evaluations; the real
-# count is POPULATION_SIZE + generations_run * OFFSPRING_PER_GENERATION.
+# Upper bound: with early stopping the EA may use fewer evaluations
+# populations holds duels to reproduce, only half gets to reproduce, and then there is only 1 offspring per 2 parents,
+# thus /4
 OFFSPRING_PER_GENERATION: int = (POPULATION_SIZE // 2) // 2
 BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE + NUM_GENERATIONS * OFFSPRING_PER_GENERATION
