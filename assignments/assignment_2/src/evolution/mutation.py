@@ -19,8 +19,8 @@ from ariel.ec import FloatMutator, Population
 # 0.25/0.5 faster and consistently, 1.0 erratically.
 MUTATION_SIGMA: float = 0.25
 
-# Per-gene probability of being mutated. With a genotype of 138 weights
-# (gecko: 15 inputs x 6 hidden + 6 hidden x 8 outputs), 0.1 changes ~14 genes
+# Per-gene probability of being mutated. With a genotype of 114 weights
+# (gecko: 13 inputs x 6 hidden + 6 hidden x 6 outputs), 0.1 changes ~11 genes
 # per child on average.
 MUTATION_RATE: float = 0.1
 
