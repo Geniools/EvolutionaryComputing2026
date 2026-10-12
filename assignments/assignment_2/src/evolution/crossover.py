@@ -38,7 +38,7 @@ def uniform_crossover(a: Genes, b: Genes) -> Genes:
     return np.where(from_b, b, a)
 
 
-# -- 4. Blend / BLX-alpha (per weight) -----------------------------------------
+# -- 2. Blend / BLX-alpha (per weight) -----------------------------------------
 
 def blend_crossover(a: Genes, b: Genes) -> Genes:
     """Sample each weight uniformly from [min - alpha*d, max + alpha*d], d = |a - b|."""
@@ -47,7 +47,7 @@ def blend_crossover(a: Genes, b: Genes) -> Genes:
     return rng.uniform(lo - margin, hi + margin)
 
 
-# -- 6. Neuron-level (per hidden neuron) -------------------------------------
+# -- 3. Neuron-level (per hidden neuron) -------------------------------------
 
 io_sizes = cache(get_io_sizes)  # compiling the model is slow; sizes never change
 
@@ -82,8 +82,8 @@ def crossover(population: Population, *, crossover_type: str = CROSSOVER_TYPE) -
 
     Parents are those tagged `selected` by `selection.parent_selection`;
     k parents give k // 2 children (an odd one out is skipped). Children
-    are tagged `mutate` for `mutation.mutate`; parents are untagged so
-    they are not re-used next generation.
+    are new, unevaluated individuals, which is how `mutation.mutate` finds
+    them; parents are untagged so they are not re-used next generation.
     """
     operator = OPERATORS[crossover_type]
     parents = population.where(lambda ind: bool(ind.tags.get("selected", False))).to_list()
@@ -93,7 +93,6 @@ def crossover(population: Population, *, crossover_type: str = CROSSOVER_TYPE) -
     for parent_a, parent_b in zip(parents[::2], parents[1::2], strict=False):
         child = Individual()
         child.genotype = operator(genes(parent_a), genes(parent_b)).tolist()
-        child.tags = {"mutate": True}
         children.append(child)
 
     for parent in parents:

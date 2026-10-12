@@ -5,14 +5,13 @@ type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
 type CrossoverTypes = Literal["none", "uniform", "blend", "neuron"]
 
 # -- Reproducibility ----------------------------------------------------------
-SEEDS: range = range(1, 6)  # seeds 1..5; default for main.py, override with --seeds
+SEEDS: range = range(1, 16)  # seeds 1..15, as used for the final runs; override with --seeds
 
 # -- Task -----------------------------------------------------------------
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]
 TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]
 SIM_DURATION: float = 15.0
 REACH_RADIUS: float = 0.15  # metres: xy-distance within which the target counts as reached
-MODE: ViewerTypes = "launcher"
 
 # -- Fitness ------------------------------------------------------------------
 DISTANCE_WEIGHT: float = 0.7  # main term: final distance to target (relative to start)
@@ -36,6 +35,9 @@ BLEND_ALPHA: float = 0.5  # BLX-alpha: how far beyond the parents' range a child
 NUM_SEED_PLOTS: int = 3  # single runs drawn in grey in the fitness plot: the first N seeds
 
 # -- Baseline -----------------------------------------------------------------
-# "Random search with the same evaluation budget" (template, YOUR JOB section).
-# Should equal POPULATION_SIZE * NUM_GENERATIONS once those are set.
-BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE + POPULATION_SIZE // 4 * NUM_GENERATIONS #populations holds duels to reproduce, only half gets to reproduce, and then there is only 1 offspring per 2 parents, thus /4
+# Random search gets the same number of evaluations as one EA run:
+# the initial population, plus the offspring of every generation. Each
+# generation, pairwise tournaments select half the population as parents
+# and every pair of parents makes one child, so POPULATION_SIZE // 4 offspring.
+OFFSPRING_PER_GENERATION: int = POPULATION_SIZE // 4
+BASELINE_NUM_EVALUATIONS: int = POPULATION_SIZE + OFFSPRING_PER_GENERATION * NUM_GENERATIONS

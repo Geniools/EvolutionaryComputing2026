@@ -3,25 +3,20 @@
 Usage (from assignment_2/):
     python src/analysis/analyze.py __data__/a2_experiments --out __data__/a2_experiments/figures
     python src/analysis/analyze.py __data__/a2_experiments/uniform_1 --out __data__/a2_experiments/uniform_1/figures
-    python src/analysis/analyze.py results/ --out figures/
-    python src/analysis/analyze.py results/ --out figures/ --configs ea_main baseline_random --tag main
-    python src/analysis/analyze.py results/ --out figures/ --configs xover_uniform xover_blend xover_sbx xover_none --tag xover
+    python src/analysis/analyze.py __data__/a2_experiments --configs baseline uniform --tag main
 
-Inputs:  __data__/a2_experiments/<crossover>_<iteration>/results.csv (main.py output)
-         results/<config>/seed_<n>/database.db
-         results/<config>/seed_<n>/evaluations.csv (random search)
+Input:   main.py's __data__/a2_experiments/<method>_<iteration>/results.csv
+         (one row per seed and generation). Pass one such folder, or their
+         parent folder to compare the latest iteration of every method.
 Fitness: LOWER IS BETTER, so best = min and worst = max.
-Choose the numbered execution folder to analyze; older results.csv files
-directly inside a2_experiments can still be analyzed by passing that folder.
 
-Layer 1 (reader):  load_run, load_evaluations_csv, load_all  -> tidy DataFrames
-Layer 2 (outputs): plot_fitness, summary_table, stats_tests  -> files in --out
+Layer 1 (reader):  load_results_csv, load_all              -> tidy DataFrames
+Layer 2 (outputs): plot_fitness, summary_table, stats_tests -> files in --out
                    (stats_tests.txt is the readable version of the .csv)
 """
 
 import argparse
 import itertools
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -29,7 +24,6 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless: write files, never open a window
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -38,29 +32,21 @@ from scipy.stats import mannwhitneyu
 
 # Make src/ importable (for config.py) when run as `python analysis/analyze.py`.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import NUM_SEED_PLOTS, POPULATION_SIZE
+from config import NUM_SEED_PLOTS
 
 ALPHA: float = 0.05  # significance level for the `result` column
 
-# Fixed colour per config, so a config keeps its colour in every plot
+# Fixed colour per method, so a method keeps its colour in every plot
 # (also when --configs drops some). Baseline is a neutral grey reference.
 CONFIG_COLORS: dict[str, str] = {
-    # main.py method names
     "baseline": "#7f7f7f",
     "none": "#e34948",
     "uniform": "#eb6834",
     "blend": "#1baf7a",
     "neuron": "#4a3aa7",
-    # results/<config>/ layout names
-    "baseline_random": "#7f7f7f",
-    "ea_main": "#2a78d6",
-    "xover_uniform": "#eb6834",
-    "xover_blend": "#1baf7a",
-    "xover_sbx": "#4a3aa7",
-    "xover_none": "#e34948",
 }
-# For configs not listed above (e.g. pilot runs), in fixed order.
-EXTRA_COLORS: list[str] = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+# For any other method name, in fixed order.
+EXTRA_COLORS: list[str] = ["#2a78d6", "#eda100", "#e87ba4", "#008300"]
 CONFIG_ORDER: list[str] = list(CONFIG_COLORS)
 
 
@@ -69,67 +55,14 @@ CONFIG_ORDER: list[str] = list(CONFIG_COLORS)
 # =============================================================================
 
 
-def load_run(db_path: str | Path) -> pd.DataFrame:
-    """Per-generation best/mean/worst fitness from one ariel.ec SQLite DB.
-
-    ariel stores every individual ever created as one row of table
-    `individual`. EA._commit() sets `time_of_birth` the first time a row is
-    saved and overwrites `time_of_death` with the current generation on
-    every save while the individual is alive. So an individual belongs to
-    the population that SURVIVED generation g when:
-        time_of_birth <= g  and  (time_of_death > g  or  alive = 1)
-    (individuals culled in generation g keep time_of_death = g and alive = 0).
-    """
-    with sqlite3.connect(db_path) as con:
-        rows = pd.read_sql_query(
-            "SELECT alive, time_of_birth, time_of_death, fitness_ FROM individual "
-            "WHERE requires_eval = 0 AND fitness_ IS NOT NULL",
-            con,
-        )
-
-    records = []
-    first_gen = int(rows["time_of_birth"].min())
-    last_gen = int(rows["time_of_death"].max())
-    for g in range(first_gen, last_gen + 1):
-        in_pop = (rows["time_of_birth"] <= g) & (
-            (rows["time_of_death"] > g) | (rows["alive"] == 1)
-        )
-        fitness = rows.loc[in_pop, "fitness_"]
-        if fitness.empty:
-            continue
-        records.append({
-            "generation": g,
-            "best": fitness.min(),  # lower is better
-            "mean": fitness.mean(),
-            "worst": fitness.max(),
-        })
-    return pd.DataFrame(records)
-
-
-def load_evaluations_csv(csv_path: str | Path, evals_per_gen: int) -> pd.DataFrame:
-    """Turn a random-search log (eval_index, fitness) into pseudo-generations.
-
-    Random search has no generations. To share the EA's x-axis we cut its
-    evaluations into chunks of `evals_per_gen` (= POPULATION_SIZE) and report,
-    per chunk g: best = best-so-far over all evaluations up to the end of g,
-    mean/worst = mean/max of the evaluations inside chunk g.
-    """
-    fitness = pd.read_csv(csv_path).sort_values("eval_index")["fitness"].to_numpy()
-    n_gens = int(np.ceil(len(fitness) / evals_per_gen))
-    records = []
-    for g in range(n_gens):
-        chunk = fitness[g * evals_per_gen:(g + 1) * evals_per_gen]
-        records.append({
-            "generation": g,
-            "best": fitness[:(g + 1) * evals_per_gen].min(),  # best-so-far
-            "mean": chunk.mean(),
-            "worst": chunk.max(),
-        })
-    return pd.DataFrame(records)
+def method_name(folder: Path) -> str:
+    """'uniform_3' -> 'uniform'; any other folder name is used as is."""
+    method, _, iteration = folder.name.rpartition("_")
+    return method if method and iteration.isdigit() else folder.name
 
 
 def load_results_csv(csv_path: Path, config: str) -> pd.DataFrame:
-    """One results.csv written by main.py, labelled with its config name."""
+    """One results.csv written by main.py, labelled with its method name."""
     runs = pd.read_csv(csv_path)
     required = {"seed", "generation", "best", "mean", "worst"}
     missing = required - set(runs.columns)
@@ -141,59 +74,33 @@ def load_results_csv(csv_path: Path, config: str) -> pd.DataFrame:
     return runs
 
 
-def load_all(results_dir: str | Path, evals_per_gen: int = POPULATION_SIZE) -> pd.DataFrame:
-    """Load main.py's CSV(s) or every results/<config>/seed_<n>/ run.
+def load_all(results_dir: str | Path) -> pd.DataFrame:
+    """Load one main.py execution folder, or the latest iteration of every method.
 
-    `results_dir` may be one main.py execution folder (uniform_1/), their
-    parent (a2_experiments/, latest iteration of every method), or results/.
-
-    Columns: config, seed, generation, best, mean, worst.
-    Nested runs use database.db when present, otherwise evaluations.csv.
+    `results_dir` is either one execution folder (uniform_1/) or their parent
+    (a2_experiments/). Columns: config, seed, generation, best, mean, worst, ...
     """
     results_dir = Path(results_dir)
     main_csv = results_dir / "results.csv"
     if main_csv.exists():
-        # main.py already logged one row per generation and seed. Reading it
-        # directly avoids reconstructing populations from the SQLite history.
-        return load_results_csv(main_csv, "ea_main")
+        return load_results_csv(main_csv, method_name(results_dir))
 
-    # main.py's parent folder: <method>_<iteration>/results.csv per method.
+    # Parent folder: <method>_<iteration>/results.csv per method.
     # Compare the methods using the latest iteration of each.
     latest: dict[str, tuple[int, Path]] = {}
     for csv_path in results_dir.glob("*_*/results.csv"):
         method, _, iteration = csv_path.parent.name.rpartition("_")
         if iteration.isdigit() and int(iteration) >= latest.get(method, (0, csv_path))[0]:
             latest[method] = (int(iteration), csv_path)
-    if latest:
-        for method, (iteration, _) in sorted(latest.items()):
-            print(f"using {method}_{iteration}")
-        return pd.concat(
-            [load_results_csv(path, method) for method, (_, path) in latest.items()],
-            ignore_index=True,
-        )
-
-    frames = []
-    for seed_dir in sorted(results_dir.glob("*/seed_*")):
-        config = seed_dir.parent.name
-        seed = int(seed_dir.name.removeprefix("seed_"))
-        if (seed_dir / "database.db").exists():
-            run = load_run(seed_dir / "database.db")
-        elif (seed_dir / "evaluations.csv").exists():
-            run = load_evaluations_csv(seed_dir / "evaluations.csv", evals_per_gen)
-        else:
-            print(f"skipping {seed_dir}: no database.db or evaluations.csv")
-            continue
-        if config.startswith("baseline"):
-            # Random search keeps nothing between "generations": report the
-            # best found so far (no-op for the CSV path, which already does).
-            run["best"] = run["best"].cummin()
-        run.insert(0, "seed", seed)
-        run.insert(0, "config", config)
-        frames.append(run)
-    if not frames:
-        msg = f"no runs found under {results_dir}"
+    if not latest:
+        msg = f"no results.csv found in {results_dir} or its <method>_<n>/ folders"
         raise FileNotFoundError(msg)
-    return pd.concat(frames, ignore_index=True)
+    for method, (iteration, _) in sorted(latest.items()):
+        print(f"using {method}_{iteration}")
+    return pd.concat(
+        [load_results_csv(path, method) for method, (_, path) in latest.items()],
+        ignore_index=True,
+    )
 
 
 def ordered_configs(df: pd.DataFrame) -> list[str]:
@@ -276,7 +183,7 @@ def summary_table(df: pd.DataFrame) -> pd.DataFrame:
 def stats_tests(df: pd.DataFrame) -> pd.DataFrame:
     """Pairwise two-sided Mann-Whitney U tests on final best fitness.
 
-    Non-parametric because 5 seeds are too few to assume normality.
+    Non-parametric: the final fitness over seeds need not be normally distributed.
     p_bonferroni = p * number_of_pairs (capped at 1), to account for doing
     many comparisons at once.
     """
@@ -323,16 +230,13 @@ The seeds of the two methods are treated as two independent groups. LOWER FITNES
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("results_dir", help="main.py output folder or folder containing <config>/seed_<n>/")
+    parser.add_argument("results_dir", help="one <method>_<n>/ folder or their parent folder")
     parser.add_argument("--out", default="figures/", help="output folder (default: figures/)")
-    parser.add_argument("--configs", nargs="+", help="only use these configs")
-    parser.add_argument("--tag", default="", help="suffix for output file names, e.g. 'xover'")
-    parser.add_argument("--evals-per-gen", type=int, default=POPULATION_SIZE,
-                        help="evaluations per pseudo-generation for random search "
-                             f"(default: POPULATION_SIZE={POPULATION_SIZE})")
+    parser.add_argument("--configs", nargs="+", help="only use these methods")
+    parser.add_argument("--tag", default="", help="suffix for output file names, e.g. 'main'")
     args = parser.parse_args()
 
-    df = load_all(args.results_dir, args.evals_per_gen)
+    df = load_all(args.results_dir)
     if args.configs:
         missing = set(args.configs) - set(df["config"])
         if missing:
@@ -354,7 +258,7 @@ def main() -> None:
         float_format="%.3f",
         caption="Final best fitness per configuration over seeds (lower is better).",
         label=f"tab:summary{suffix}",
-        escape=True,  # config names contain '_'
+        escape=True,  # escape LaTeX special characters such as '_'
     )
 
     tests = stats_tests(df)

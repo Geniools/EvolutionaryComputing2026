@@ -48,7 +48,7 @@ def main() -> None:
     args = parser.parse_args()
 
     folder = Path(args.dir)
-    dbs = [folder / f"seed_{args.seed}.db"] if args.seed else sorted(folder.glob("seed_*.db"))
+    dbs = [folder / f"seed_{args.seed}.db"] if args.seed is not None else sorted(folder.glob("seed_*.db"))
     if not dbs or not all(db.exists() for db in dbs):
         parser.error(f"database(s) not found in {folder}")
 
