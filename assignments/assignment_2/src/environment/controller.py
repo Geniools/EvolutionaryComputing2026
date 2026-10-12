@@ -1,11 +1,10 @@
-"""The controller contract (template section 2).
+"""Neural-network controller and the genotype <-> weights mapping.
 
-MuJoCo calls `nn_controller` every physics step; it must write
-`model.nu` values into `data.ctrl`, scaled to [-pi/2, pi/2].
+MuJoCo calls `nn_controller` every physics step; it returns `model.nu`
+values for `data.ctrl`, scaled to [-pi/2, pi/2].
 
-`decode_genotype` / `genotype_length` implement the "reshape a flat
-genotype back into these matrices" part the template leaves to you -
-they are mechanical, not a design choice.
+The genotype is a flat list of all weights; `decode_genotype` reshapes it
+into the two weight matrices [w1, w2] of the network.
 """
 
 import mujoco as mj
@@ -46,16 +45,15 @@ def nn_controller(
         data: mj.MjData,
         weights: Weights,
 ) -> npt.NDArray[np.float64]:
-    """Map robot state to hinge commands: in -> hidden -> actions.
+    """Map robot state to hinge commands: inputs -> hidden (tanh) -> outputs (tanh).
 
-    Default architecture from the template. You may change it (layers,
-    activations, inputs) - just keep input/output sizes consistent with
-    `genotype_length` / `decode_genotype` above, and keep it fixed within
-    an experiment.
+    One hidden layer of HIDDEN_SIZE neurons, no biases, the same for every
+    experiment.
     """
     w1, w2 = weights
 
-    # Bare qpos - simplest choice, not necessarily the best one.
+    # Inputs: data.qpos, i.e. the core's position and orientation plus every
+    # hinge angle.
     inputs = data.qpos
 
     layer1 = np.tanh(inputs @ w1)

@@ -1,4 +1,4 @@
-"""Gaussian mutation for real-valued genotypes (M3).
+"""Gaussian mutation for real-valued genotypes.
 
 Two functions:
 - `mutate(population, ...)`             -> the EA step used in main.py
@@ -15,8 +15,8 @@ from ariel.ec import FloatMutator, Population
 # Standard deviation of the Gaussian noise added to a mutated gene.
 # The initial weights are drawn from N(0, 0.5) (evolution/genotype.py), so 0.25
 # is half the typical weight size: big enough to move, small enough to stay
-# near the parent. Chosen with a small sigma pilot: 0.02/0.1 improved slowly,
-# 0.25/0.5 faster and consistently, 1.0 erratically.
+# near the parent. In a short pilot, 0.02 and 0.1 improved slowly, 0.25 and
+# 0.5 faster and consistently, and 1.0 erratically.
 MUTATION_SIGMA: float = 0.25
 
 # Per-gene probability of being mutated. With a genotype of 114 weights
@@ -32,14 +32,10 @@ def mutate(
 ) -> Population:
     """Mutate every offspring (= not yet evaluated individual) in place.
 
-    Offspring are recognised by `requires_eval`, which is True for freshly
-    created individuals (e.g. children from `crossover.crossover`), so no
-    extra tag is needed. Uses ariel's RNG, so `set_seed(seed)` makes the
+    Offspring are recognised by `requires_eval`, which is True for the new
+    children made by `crossover.crossover` (also for the "none" variant,
+    which copies a parent). Uses ariel's RNG, so `set_seed(seed)` makes the
     whole EA reproducible.
-
-    Note: if there is no crossover (mutation-only), the crossover step must
-    still create copies of the parents as new individuals, otherwise there
-    are no offspring for this function to mutate.
     """
     for ind in population.unevaluated:
         child = mutate_genotype(ind.genotype, sigma=sigma, rate=rate)

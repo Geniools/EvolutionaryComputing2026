@@ -1,6 +1,6 @@
 """Run the random-search baseline and every crossover variant, one after another.
 
-Use python main.py for seeds 1 through 5 by default, or pass --seeds in the
+Use python main.py for seeds 1 through 15 by default, or pass --seeds in the
 terminal to choose single or multiple different seeds. Pass --methods to run
 only some of: baseline none uniform blend neuron. Pass --workers N to spread
 the simulations over N processes; results are the same, only faster.
@@ -31,7 +31,8 @@ from ariel import console
 from ariel.ec import EA, EAOperation, Individual, Population, config as ea_config, set_seed
 
 from config import (
-    BASELINE_NUM_EVALUATIONS, BLEND_ALPHA, HIDDEN_SIZE, NUM_GENERATIONS, POPULATION_SIZE, SEEDS,
+    BASELINE_NUM_EVALUATIONS, BLEND_ALPHA, HIDDEN_SIZE, NUM_GENERATIONS, OFFSPRING_PER_GENERATION,
+    POPULATION_SIZE, SEEDS,
 )
 from environment.simulation import get_io_sizes
 from evolution import evaluation
@@ -112,7 +113,7 @@ def run_baseline(seed: int, evaluations_path: Path) -> list[dict]:
         writer.writerow(["eval_index", "fitness", *(f"gene_{i}" for i in range(len(individuals[0].genotype)))])
         writer.writerows([i, ind.fitness, *ind.genotype] for i, ind in enumerate(individuals))
 
-    offspring = (BASELINE_NUM_EVALUATIONS - POPULATION_SIZE) // NUM_GENERATIONS
+    offspring = OFFSPRING_PER_GENERATION
     log: list[dict] = []
     start = 0
     for generation in range(NUM_GENERATIONS + 1):

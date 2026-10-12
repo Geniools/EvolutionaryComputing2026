@@ -74,18 +74,8 @@ def run_simulation(
         prev_position = position
         if reach_time is None and dist <= REACH_RADIUS:
             reach_time = float(d.time)
-        actions = nn_controller(m, d, weights)
-
-        # Blown-up weights silently write NaN into d.ctrl (template warning).
-        # assert np.all(np.isfinite(actions)), "controller produced NaN/inf"
-
-        # DIRECT application (see the controller contract in controller.py).
-        d.ctrl[:] = actions
-
-        # DELTA application - comment out the line above and use these instead:
-        # delta = 0.05
-        # d.ctrl[:] += actions * delta
-        # d.ctrl[:] = np.clip(d.ctrl, -np.pi / 2, np.pi / 2)
+        # The network's output is used directly as the hinge target angles.
+        d.ctrl[:] = nn_controller(m, d, weights)
 
     initial_position = get_core_position(data)
 

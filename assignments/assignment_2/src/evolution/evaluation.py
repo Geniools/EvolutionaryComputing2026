@@ -24,7 +24,7 @@ def evaluate_genotypes(genotypes: list[Genotype]) -> list[float]:
 
 
 def evaluate(population: Population) -> Population:
-    """ Run every unevaluated individual headlessly and record its fitness. """
+    """Run every unevaluated individual headlessly and record its fitness. """
     individuals = list(population.unevaluated)
     fitnesses = evaluate_genotypes([cast("Genotype", ind.genotype) for ind in individuals])
     for ind, fitness in zip(individuals, fitnesses, strict=True):
