@@ -14,8 +14,7 @@ from functools import cache
 import numpy as np
 import numpy.typing as npt
 from ariel.ec import Individual, Population
-# Ariel's shared RNG, seeded by set_seed()
-from ariel.ec.generators import _rng as rng  # pyright: ignore[reportPrivateUsage]
+from ariel.ec.generators import _rng as rng  # pyright: ignore[reportPrivateUsage]  # ariel's shared RNG, seeded by set_seed()
 
 from config import BLEND_ALPHA, CROSSOVER_TYPE, HIDDEN_SIZE
 from environment.controller import decode_genotype
@@ -68,10 +67,10 @@ def neuron_crossover(a: Genes, b: Genes) -> Genes:
 # -- Dispatch ------------------------------------------------------------------
 
 OPERATORS: dict[str, Callable[[Genes, Genes], Genes]] = {
-    "none"   : no_crossover,
+    "none": no_crossover,
     "uniform": uniform_crossover,
-    "blend"  : blend_crossover,
-    "neuron" : neuron_crossover,
+    "blend": blend_crossover,
+    "neuron": neuron_crossover,
 }
 if CROSSOVER_TYPE not in OPERATORS:
     msg = f"unknown CROSSOVER_TYPE {CROSSOVER_TYPE!r}, choose from {list(OPERATORS)}"
@@ -82,7 +81,9 @@ def crossover(population: Population, *, crossover_type: str = CROSSOVER_TYPE) -
     """Shuffle the selected parents, pair them up, add one child per pair.
 
     Parents are those tagged `selected` by `selection.parent_selection`;
-    k parents give k // 2 children (an odd one out is skipped).
+    k parents give k // 2 children (an odd one out is skipped). Children
+    are tagged `mutate` for `mutation.mutate`; parents are untagged so
+    they are not re-used next generation.
     """
     operator = OPERATORS[crossover_type]
     parents = population.where(lambda ind: bool(ind.tags.get("selected", False))).to_list()
@@ -92,11 +93,11 @@ def crossover(population: Population, *, crossover_type: str = CROSSOVER_TYPE) -
     for parent_a, parent_b in zip(parents[::2], parents[1::2], strict=False):
         child = Individual()
         child.genotype = operator(genes(parent_a), genes(parent_b)).tolist()
+        child.tags = {"mutate": True}
         children.append(child)
 
     for parent in parents:
         parent.tags = {"selected": False}
-
     population.extend(children)
     return population
 

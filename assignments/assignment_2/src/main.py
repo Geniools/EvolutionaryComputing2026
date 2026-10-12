@@ -1,16 +1,14 @@
 """Run the random-search baseline and every crossover variant, one after another.
 
 Use python main.py for seeds 1 through 5 by default, or pass --seeds in the
-terminal to choose single or multiple different seeds.
-
-- Pass --methods to run only some of: baseline none uniform blend neuron.
-- Pass --workers N to spread the simulations over N processes; results are
- the same, only faster.
-
+terminal to choose single or multiple different seeds. Pass --methods to run
+only some of: baseline none uniform blend neuron. Pass --workers N to spread
+the simulations over N processes; results are the same, only faster.
 Each execution gets a numbered folder per method, such as
 __data__/a2_experiments/uniform_1/ or __data__/a2_experiments/baseline_1/.
 It contains settings.json, results.csv, and per seed either a database (EA)
 or seed_<n>_evaluations.csv with every evaluated genotype (baseline).
+Previous executions are preserved.
 """
 
 import argparse
@@ -28,15 +26,6 @@ from ariel import console
 from ariel.ec import EA, EAOperation, Individual, Population, config as ea_config, set_seed
 
 from config import (
-    BLEND_ALPHA,
-    CROSSOVER_TYPE,
-    HIDDEN_SIZE,
-    MUTATION_RATE,
-    MUTATION_SIGMA,
-    NUM_GENERATIONS,
-    PLATEAU_MIN_IMPROVEMENT,
-    PLATEAU_PATIENCE,
-    POPULATION_SIZE,
     BASELINE_NUM_EVALUATIONS, BLEND_ALPHA, HIDDEN_SIZE, NUM_GENERATIONS, POPULATION_SIZE, SEEDS,
 )
 from environment.simulation import get_io_sizes
@@ -45,7 +34,7 @@ from evolution.baseline import random_search
 from evolution.crossover import OPERATORS, crossover
 from evolution.evaluation import evaluate
 from evolution.genotype import make_individual
-from evolution.mutation import mutate
+from evolution.mutation import MUTATION_RATE, MUTATION_SIGMA, mutate
 from evolution.selection import parent_selection, survivor_selection
 from evolution.statistics import record_stats
 
@@ -65,8 +54,8 @@ def create_experiment_dir(root: Path, crossover_type: str) -> Path:
         int(path.name[len(prefix):])
         for path in root.iterdir()
         if path.is_dir()
-           and path.name.startswith(prefix)
-           and path.name[len(prefix):].isdigit()
+        and path.name.startswith(prefix)
+        and path.name[len(prefix):].isdigit()
     ]
     iteration = max(iterations, default=0) + 1
 
@@ -85,14 +74,6 @@ def build_initial_population(input_size: int, output_size: int) -> Population:
     return Population(
             [make_individual(input_size, output_size) for _ in range(POPULATION_SIZE)],
     )
-
-
-def has_plateaued(log: list[dict]) -> bool:
-    """True if the best fitness barely improved over the last PLATEAU_PATIENCE generations."""
-    if len(log) <= PLATEAU_PATIENCE:
-        return False
-    improvement = log[-PLATEAU_PATIENCE - 1]["best"] - log[-1]["best"]  # lower is better
-    return improvement < PLATEAU_MIN_IMPROVEMENT
 
 
 def seed_everything(seed: int) -> None:
@@ -131,16 +112,14 @@ def run_baseline(seed: int, evaluations_path: Path) -> list[dict]:
     for generation in range(NUM_GENERATIONS + 1):
         end = start + (POPULATION_SIZE if generation == 0 else offspring)
         chunk = fitnesses[start:end]
-        log.append(
-                {
-                    "generation"     : generation,
-                    "best"           : min(fitnesses[:end]),
-                    "mean"           : float(np.mean(chunk)),
-                    "worst"          : max(chunk),
-                    "fitness_std"    : float(np.std(chunk)),
-                    "population_size": len(chunk),
-                }
-        )
+        log.append({
+            "generation": generation,
+            "best": min(fitnesses[:end]),
+            "mean": float(np.mean(chunk)),
+            "worst": max(chunk),
+            "fitness_std": float(np.std(chunk)),
+            "population_size": len(chunk),
+        })
         start = end
     return log
 
@@ -169,20 +148,14 @@ def run_evolution(seed: int, db_path: Path, crossover_type: str) -> list[dict]:
     ]
 
     ea = EA(
-            initial,
-            ops,
-            num_steps=NUM_GENERATIONS,
-            is_maximisation=False,
-            db_file_path=db_path,
-            db_handling="delete",
+        initial,
+        ops,
+        num_steps=NUM_GENERATIONS,
+        is_maximisation=False,
+        db_file_path=db_path,
+        db_handling="delete",
     )
-    # Step manually instead of ea.run() so the run can stop at a plateau;
-    # NUM_GENERATIONS is only the upper limit.
-    for _ in range(NUM_GENERATIONS):
-        ea.step()  # record_stats appends this generation to `log`
-        if has_plateaued(log):
-            console.log(f"plateau reached at generation {len(log) - 1}")
-            break
+    ea.run()
     return log
 
 
@@ -193,16 +166,14 @@ def run_method(method: str, seeds: list[int]) -> None:
     console.log(f"experiment output: {output_dir}")
 
     settings = {
-        "crossover_type"          : method,
-        "seeds"                   : seeds,
-        "num_generations"         : NUM_GENERATIONS,
-        "plateau_patience"        : PLATEAU_PATIENCE,
-        "plateau_min_improvement" : PLATEAU_MIN_IMPROVEMENT,
-        "population_size"         : POPULATION_SIZE,
-        "hidden_size"             : HIDDEN_SIZE,
-        "blend_alpha"             : BLEND_ALPHA,
-        "mutation_rate"           : MUTATION_RATE,
-        "mutation_sigma"          : MUTATION_SIGMA,
+        "crossover_type": method,
+        "seeds": seeds,
+        "num_generations": NUM_GENERATIONS,
+        "population_size": POPULATION_SIZE,
+        "hidden_size": HIDDEN_SIZE,
+        "blend_alpha": BLEND_ALPHA,
+        "mutation_rate": MUTATION_RATE,
+        "mutation_sigma": MUTATION_SIGMA,
         "baseline_num_evaluations": BASELINE_NUM_EVALUATIONS,
     }
     with (output_dir / "settings.json").open("x", encoding="utf-8") as file:
@@ -211,11 +182,11 @@ def run_method(method: str, seeds: list[int]) -> None:
 
     with results_path.open("x", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
-                file,
-                fieldnames=[
-                    "seed", "generation", "best", "mean", "worst",
-                    "fitness_std", "population_size",
-                ],
+            file,
+            fieldnames=[
+                "seed", "generation", "best", "mean", "worst",
+                "fitness_std", "population_size",
+            ],
         )
         writer.writeheader()
 
@@ -237,10 +208,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seeds", nargs="+", type=int, default=list(SEEDS))
     parser.add_argument("--methods", nargs="+", choices=METHODS, default=METHODS)
-    parser.add_argument(
-            "--workers", type=int, default=1,
-            help="processes used for evaluation (default 1: no multiprocessing)"
-    )
+    parser.add_argument("--workers", type=int, default=1,
+                        help="processes used for evaluation (default 1: no multiprocessing)")
     args = parser.parse_args()
     if len(args.seeds) != len(set(args.seeds)):
         parser.error("Each seed must be listed only once")

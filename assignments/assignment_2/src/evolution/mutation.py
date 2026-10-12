@@ -11,8 +11,18 @@ import numpy as np
 import numpy.typing as npt
 from ariel.ec import FloatMutator, Population
 
-# Defaults (and the reasoning behind them) live in config.py.
-from config import MUTATION_RATE, MUTATION_SIGMA
+# -- Default mutation parameters ---------------------------------------------
+# Standard deviation of the Gaussian noise added to a mutated gene.
+# The initial weights are drawn from N(0, 0.5) (evolution/genotype.py), so 0.25
+# is half the typical weight size: big enough to move, small enough to stay
+# near the parent. Chosen with a small sigma pilot: 0.02/0.1 improved slowly,
+# 0.25/0.5 faster and consistently, 1.0 erratically.
+MUTATION_SIGMA: float = 0.25
+
+# Per-gene probability of being mutated. With a genotype of 114 weights
+# (gecko: 13 inputs x 6 hidden + 6 hidden x 6 outputs), 0.1 changes ~11 genes
+# per child on average.
+MUTATION_RATE: float = 0.1
 
 
 def mutate(
@@ -24,7 +34,8 @@ def mutate(
 
     Offspring are recognised by `requires_eval`, which is True for freshly
     created individuals (e.g. children from `crossover.crossover`), so no
-    extra tag is needed.
+    extra tag is needed. Uses ariel's RNG, so `set_seed(seed)` makes the
+    whole EA reproducible.
 
     Note: if there is no crossover (mutation-only), the crossover step must
     still create copies of the parents as new individuals, otherwise there
@@ -33,6 +44,7 @@ def mutate(
     for ind in population.unevaluated:
         child = mutate_genotype(ind.genotype, sigma=sigma, rate=rate)
         ind.genotype = child.tolist()  # the DB stores genotypes as JSON lists
+        ind.requires_eval = True  # re-score after mutation
     return population
 
 
